@@ -262,10 +262,11 @@ export async function getConfig() {
  * The backend (/current-track, /lyrics) scopes the response to that player's
  * recognition engine when the param is present.
  */
-function withPlayerScope(path) {
-    if (!selectedPlayer) return path;
+function withPlayerScope(path, playerOverride = null) {
+    const playerName = playerOverride || selectedPlayer;
+    if (!playerName) return path;
     const sep = path.includes('?') ? '&' : '?';
-    return `${path}${sep}player=${encodeURIComponent(selectedPlayer)}`;
+    return `${path}${sep}player=${encodeURIComponent(playerName)}`;
 }
 
 /**
@@ -647,8 +648,8 @@ export async function toggleInstrumentalMark(isInstrumental) {
  * @param {string} action - 'previous', 'next', or 'play-pause'
  * @returns {Promise<Object>} Result
  */
-export async function playbackCommand(action) {
-    return apiFetch(`/api/playback/${action}`, { method: 'POST' });
+export async function playbackCommand(action, playerName = null) {
+    return apiFetch(withPlayerScope(`/api/playback/${action}`, playerName), { method: 'POST' });
 }
 
 /**
@@ -657,8 +658,8 @@ export async function playbackCommand(action) {
  * @param {number} positionMs - Position in milliseconds
  * @returns {Promise<Object>} Result
  */
-export async function seekToPosition(positionMs) {
-    return postJson('/api/playback/seek', { position_ms: positionMs });
+export async function seekToPosition(positionMs, playerName = null) {
+    return postJson(withPlayerScope('/api/playback/seek', playerName), { position_ms: positionMs });
 }
 
 // ========== QUEUE ==========
@@ -669,7 +670,7 @@ export async function seekToPosition(positionMs) {
  * @returns {Promise<Object>} Queue data
  */
 export async function fetchQueue() {
-    return apiFetch('/api/playback/queue');
+    return apiFetch(withPlayerScope('/api/playback/queue'));
 }
 
 // ========== LIKE ==========
