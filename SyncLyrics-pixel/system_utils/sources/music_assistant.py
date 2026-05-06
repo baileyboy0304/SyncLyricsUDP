@@ -624,7 +624,7 @@ class MusicAssistantSource(BaseMetadataSource):
 
     async def toggle_playback(self, player_id: Optional[str] = None) -> bool:
         """Toggle play/pause on the active queue or supplied MA player."""
-        if not await _ensure_connected_nonblocking():
+        if not await _ensure_connected():
             logger.debug("Music Assistant toggle_playback: not connected/ready for player_id=%r", player_id)
             return False
 
@@ -644,7 +644,7 @@ class MusicAssistantSource(BaseMetadataSource):
     
     async def play(self, player_id: Optional[str] = None) -> bool:
         """Resume playback on the active queue or supplied MA player."""
-        if not await _ensure_connected_nonblocking():
+        if not await _ensure_connected():
             logger.debug("Music Assistant play: not connected/ready for player_id=%r", player_id)
             return False
 
@@ -663,7 +663,7 @@ class MusicAssistantSource(BaseMetadataSource):
     
     async def pause(self, player_id: Optional[str] = None) -> bool:
         """Pause playback on the active queue or supplied MA player."""
-        if not await _ensure_connected_nonblocking():
+        if not await _ensure_connected():
             logger.debug("Music Assistant pause: not connected/ready for player_id=%r", player_id)
             return False
 
@@ -682,7 +682,7 @@ class MusicAssistantSource(BaseMetadataSource):
     
     async def next_track(self, player_id: Optional[str] = None) -> bool:
         """Skip to next track on the active queue or supplied MA player."""
-        if not await _ensure_connected_nonblocking():
+        if not await _ensure_connected():
             logger.debug("Music Assistant next_track: not connected/ready for player_id=%r", player_id)
             return False
 
@@ -701,7 +701,7 @@ class MusicAssistantSource(BaseMetadataSource):
     
     async def previous_track(self, player_id: Optional[str] = None) -> bool:
         """Skip to previous track on the active queue or supplied MA player."""
-        if not await _ensure_connected_nonblocking():
+        if not await _ensure_connected():
             logger.debug("Music Assistant previous_track: not connected/ready for player_id=%r", player_id)
             return False
 
@@ -720,7 +720,7 @@ class MusicAssistantSource(BaseMetadataSource):
     
     async def seek(self, position_ms: int, player_id: Optional[str] = None) -> bool:
         """Seek to position in milliseconds on active queue or supplied MA player."""
-        if not await _ensure_connected_nonblocking():
+        if not await _ensure_connected():
             logger.debug("Music Assistant seek: not connected/ready for player_id=%r", player_id)
             return False
 
@@ -739,30 +739,32 @@ class MusicAssistantSource(BaseMetadataSource):
             logger.debug(f"Music Assistant seek failed: {e}")
             return False
     
-    async def get_queue(self) -> Optional[Dict]:
+    async def get_queue(self, player_id: Optional[str] = None) -> Optional[Dict]:
         """
         Get playback queue (upcoming songs only).
         
         Returns queue in Spotify-compatible format for frontend compatibility.
         Only returns songs AFTER the current playing song, not history.
         """
-        if not await _ensure_connected_nonblocking():
+        if not await _ensure_connected():
             return None
         
         try:
-            queue_id = _current_queue_id or _current_player_id
+            queue_id = await self._get_control_queue_id(player_id)
             if not queue_id:
+                logger.debug("Music Assistant get_queue: no queue for player_id=%r", player_id)
                 return None
-            
+
             # Get queue object to find current position
             queue_obj = _client.player_queues.get(queue_id)
             if not queue_obj:
-                return None
-            
+                logger.debug("Music Assistant get_queue: queue_id=%r not present in client cache", queue_id)
+
             # Get current index - this is where we are in the queue
             # MA queue includes history (played songs) at the beginning
             # We want to start AFTER the current song to get only upcoming
-            current_index = getattr(queue_obj, 'current_index', 0) or 0
+            current_index = getattr(queue_obj, 'current_index', 0) if queue_obj else 0
+            current_index = current_index or 0
             
             # Get items starting AFTER the current item
             # offset = current_index + 1 skips history AND current song

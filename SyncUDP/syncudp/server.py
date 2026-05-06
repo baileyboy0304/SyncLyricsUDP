@@ -2049,7 +2049,7 @@ async def _resolve_ma_player_id_for_request() -> Optional[str]:
 
     try:
         from system_utils.sources import music_assistant as ma_module
-        if await ma_module._ensure_connected_nonblocking() and ma_module._client:
+        if await ma_module._ensure_connected() and ma_module._client:
             for cand in candidates:
                 direct = ma_module._client.players.get(cand)
                 if direct is not None:

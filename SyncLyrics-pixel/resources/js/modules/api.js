@@ -670,7 +670,7 @@ export async function seekToPosition(positionMs, playerName = null) {
  * @returns {Promise<Object>} Queue data
  */
 export async function fetchQueue() {
-    return apiFetch('/api/playback/queue');
+    return apiFetch(withPlayerScope('/api/playback/queue'));
 }
 
 // ========== LIKE ==========

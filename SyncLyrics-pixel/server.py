@@ -2704,6 +2704,27 @@ async def get_playback_queue():
     # Check if we should use Spicetify (more accurate queue with autoplay tracks)
     metadata = await get_current_song_meta_data()
     source = metadata.get('source') if metadata else None
+
+    scoped_player_name = _player_name_from_request()
+    scoped_ma_player_id = _get_music_assistant_player_id_for_player(scoped_player_name)
+    if scoped_ma_player_id:
+        try:
+            from system_utils.sources.music_assistant import MusicAssistantSource
+            ma_source = MusicAssistantSource()
+            queue_data = await ma_source.get_queue(player_id=scoped_ma_player_id)
+            if queue_data:
+                return jsonify({
+                    "current": queue_data.get('current'),
+                    "queue": queue_data.get('queue', [])[:20],
+                    "source": "music_assistant",
+                })
+            logger.debug(
+                "Playback queue scoped MA request failed - requested_player=%r linked_ma_player_id=%r",
+                scoped_player_name,
+                scoped_ma_player_id,
+            )
+        except Exception as e:
+            logger.debug(f"Scoped Music Assistant queue routing failed: {e}")
     
     if source == 'spicetify':
         # Try Spicetify first (includes autoplay tracks that Web API misses)
