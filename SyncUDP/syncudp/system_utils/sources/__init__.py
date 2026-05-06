@@ -186,6 +186,12 @@ def get_enabled_plugin_sources() -> List[BaseMetadataSource]:
         if instance is None:
             continue
         
+        # UDP-only add-on: do not resurrect old local desktop sources from
+        # persisted settings.json values. Music Assistant is kept as an
+        # optional metadata/player-name integration, not as a local input.
+        if name not in ("music_assistant",):
+            continue
+
         # Check if enabled
         if not instance.enabled:
             continue

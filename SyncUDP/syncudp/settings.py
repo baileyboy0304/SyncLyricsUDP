@@ -143,9 +143,7 @@ class SettingsManager:
             "lyrics.display.update_interval": Setting("Update Interval", float, 0.1, False, "Lyrics", "UI refresh rate (s)", "slider", min_val=0.05, max_val=1.0),
             "lyrics.display.idle_interval": Setting("Idle Interval", float, 2.0, False, "Lyrics", "Check rate when idle (s)", "slider", min_val=1.0, max_val=30.0),
             "lyrics.display.latency_compensation": Setting("Latency Comp", float, -0.1, False, "Lyrics", "Sync offset (+early, -late)", "slider", min_val=-2.0, max_val=2.0),
-            "lyrics.display.spotify_latency_compensation": Setting("Spotify Latency", float, -0.5, False, "Lyrics", "Spotify sync (+early, -late)", "slider", min_val=-2.0, max_val=2.0),
             "lyrics.display.audio_recognition_latency_compensation": Setting("Audio Rec Latency", float, 0.1, False, "Lyrics", "Audio rec sync (+early, -late)", "slider", min_val=-2.0, max_val=2.0),
-            "lyrics.display.spicetify_latency_compensation": Setting("Spicetify Latency", float, 0.0, False, "Lyrics", "Spicetify sync (+early, -late)", "slider", min_val=-2.0, max_val=2.0),
             "lyrics.display.word_sync_latency_compensation": Setting("Word-Sync Latency", float, -0.1, False, "Lyrics", "Word-sync offset (+early, -late)", "slider", min_val=-2.0, max_val=2.0),
             "lyrics.display.musixmatch_word_sync_offset": Setting("Musixmatch Offset", float, -0.1, False, "Lyrics", "Musixmatch word-sync timing adjustment (s)", "slider", min_val=-10.0, max_val=10.0),
             "lyrics.display.netease_word_sync_offset": Setting("NetEase Offset", float, -0.1, False, "Lyrics", "NetEase word-sync timing adjustment (s)", "slider", min_val=-10.0, max_val=10.0),
@@ -214,18 +212,9 @@ class SettingsManager:
             "notifications.icon_path": Setting("Icon", str, "resources/images/icon.ico", False, "Deprecated", "Icon path", deprecated=True),
 
             # System
-            "system.windows.media_session.enabled": Setting("Win Media", bool, True, True, "System", "Enable Windows Media", "switch"),
-            "system.windows.media_session.preferred": Setting("Prefer Win", bool, True, True, "System", "Prefer Windows Media", "switch"),
-            "system.windows.media_session.timeout": Setting("Timeout", int, 5, False, "System", "SMTC timeout (s)", "number"),
             # Linux - Deprecated (Linux not actively supported)
-            "system.linux.gsettings_enabled": Setting("GSettings", bool, True, True, "Deprecated", "Enable GSettings", "switch", deprecated=True),
-            "system.linux.playerctl_required": Setting("Playerctl", bool, True, True, "Deprecated", "Require Playerctl", "switch", deprecated=True),
             
             # New Blocklist Setting (empty by default - users can add via dropdown)
-            "system.windows.app_blocklist": Setting("App Blocklist", list, [], False, "System", "Apps to ignore (partial match)", "list"),
-            "system.windows.paused_timeout": Setting("Paused Timeout", int, 600, False, "System", "Accept paused Windows media for N seconds (0=forever)", "number"),
-            "system.spotify.paused_timeout": Setting("Spotify Paused Timeout", int, 600, False, "System", "Accept paused Spotify for N seconds (0=forever)", "number"),
-            "system.spicetify.paused_timeout": Setting("Spicetify Paused Timeout", int, 600, False, "System", "Accept paused Spicetify for N seconds (0=forever)", "number"),
 
             # Features - Active
             "features.save_lyrics_locally": Setting("Save Lyrics Locally", bool, True, False, "Features", "Save lyrics to disk", "switch"),
@@ -233,7 +222,6 @@ class SettingsManager:
             "features.album_art_db": Setting("Album Art Database", bool, True, False, "Features", "Enable album art database", "switch"),
             "features.word_sync_auto_switch": Setting("Word-Sync Auto-Switch", bool, False, False, "Features", "Auto-switch to provider with word-sync even if another is preferred", "switch"),
             "features.word_sync_default_enabled": Setting("Word-Sync Default On", bool, True, False, "Features", "Enable word-sync by default (frontend can still toggle)", "switch"),
-            "features.spicetify_database": Setting("Spicetify Database", bool, True, False, "Features", "Cache audio analysis for waveform/spectrum", "switch"),
             
             # Features - Deprecated (not wired up)
             "features.minimal_ui": Setting("Minimal UI", bool, False, False, "Deprecated", "Enable minimal mode", "switch", deprecated=True),
@@ -242,40 +230,13 @@ class SettingsManager:
             "features.auto_theme": Setting("Auto Theme", bool, True, False, "Deprecated", "Auto-switch theme", "switch", deprecated=True),
             "features.album_art_colors": Setting("Art Colors", bool, True, False, "Deprecated", "Use album art colors", "switch", deprecated=True),
 
-            # Media Source
-            "media_source.spotify.enabled": Setting("Spotify Source", bool, True, True, "Media", "Enable Spotify source", "switch"),
-            "media_source.spotify.priority": Setting("Priority", int, 2, False, "Media", "Source priority", "number"),
-            "media_source.windows_media.enabled": Setting("Win Source", bool, True, True, "Media", "Enable Windows source", "switch"),
-            "media_source.windows_media.priority": Setting("Priority", int, 1, False, "Media", "Source priority", "number"),
-            "media_source.spicetify.enabled": Setting("Spicetify Source", bool, True, True, "Media", "Enable Spicetify bridge (Spotify Desktop)", "switch"),
-            "media_source.spicetify.priority": Setting("Priority", int, 0, False, "Media", "Source priority (0 = highest)", "number"),
-            
-            # Plugin Sources (new plugin-based architecture)
-            "media_source.linux.enabled": Setting("Linux Source", bool, True, True, "Media", "Enable Linux MPRIS source (via playerctl)", "switch"),
-            "media_source.linux.priority": Setting("Linux Priority", int, 1, False, "Media", "Source priority (lower = first)", "number"),
-            "system.linux.paused_timeout": Setting("Linux Paused Timeout", int, 600, False, "System", "Accept paused Linux source for N seconds (0=forever)", "number"),
-            
-            # macOS Plugin Source
-            "media_source.macos.enabled": Setting("macOS Source", bool, True, True, "Media", "Enable macOS Now Playing source (via nowplaying-cli)", "switch"),
-            "media_source.macos.priority": Setting("macOS Priority", int, 1, False, "Media", "Source priority (lower = first)", "number"),
-            "system.macos.paused_timeout": Setting("macOS Paused Timeout", int, 600, False, "System", "Accept paused macOS source for N seconds (0=forever)", "number"),
-            "lyrics.display.macos_latency_compensation": Setting("macOS Latency", float, 0.0, False, "Lyrics", "macOS sync offset (+early, -late)", "slider", min_val=-2.0, max_val=2.0),
-
-            
-            # Music Assistant Plugin
-            "media_source.music_assistant.enabled": Setting("Music Assistant", bool, True, True, "Media", "Enable Music Assistant source", "switch"),
-            "media_source.music_assistant.priority": Setting("MA Priority", int, 1, False, "Media", "Source priority (lower = first)", "number"),
+            # Music Assistant metadata placeholders (kept for UDP stream naming/enrichment)
             "system.music_assistant.server_url": Setting("MA Server URL", str, "", True, "Music Assistant", "Server URL (e.g., http://192.168.1.100:8095)", "text"),
             "system.music_assistant.token": Setting("MA Token", str, "", True, "Music Assistant", "API token (from MA web UI)", "text"),
             "system.music_assistant.player_id": Setting("MA Player ID", str, "", False, "Music Assistant", "Specific player (blank = auto-detect)", "text"),
             "system.music_assistant.paused_timeout": Setting("MA Paused Timeout", int, 600, False, "Music Assistant", "Accept paused MA for N seconds (0=forever)", "number"),
             "lyrics.display.music_assistant_latency_compensation": Setting("Music Assistant Latency", float, 0.0, False, "Lyrics", "Music Assistant sync (+early, -late)", "slider", min_val=-2.0, max_val=2.0),
 
-            "spotify.redirect_uri": Setting("Redirect URI", str, "http://127.0.0.1:9012/callback", True, "Spotify API", "Callback URL"),
-            "spotify.cache.metadata_ttl": Setting("Metadata TTL", float, 2.0, False, "Spotify API", "Metadata cache (s)", "number"),
-            "spotify.cache.enabled": Setting("Cache Enabled", bool, True, False, "Spotify API", "Enable API cache", "switch"),
-            "spotify.polling.fast_interval": Setting("Fast Poll Interval", float, 2.0, False, "Spotify API", "Spotify-only mode polling (s)", "slider", min_val=0.5, max_val=10.0),
-            "spotify.polling.slow_interval": Setting("Slow Poll Interval", float, 6.0, False, "Spotify API", "Hybrid/idle mode polling (s)", "slider", min_val=1.0, max_val=30.0),
 
             
             # Album Art
@@ -306,30 +267,25 @@ class SettingsManager:
             "slideshow.shuffle": Setting("Shuffle Mode", bool, True, False, "Slideshow", "Random image order", "switch"),
             "slideshow.transition_duration": Setting("Transition Duration", float, 1.0, False, "Slideshow", "Crossfade duration (s)", "slider", min_val=0.2, max_val=2.0),
 
-            # Audio Recognition (Reaper Integration)
-            "audio_recognition.enabled": Setting("Audio Recognition", bool, False, False, "Audio Recognition", "Auto-enable audio fingerprinting on startup. Recommended to keep OFF.", "switch"),
-            "audio_recognition.reaper_auto_detect": Setting("Reaper Auto-Detect", bool, False, False, "Audio Recognition", "Auto-start when Reaper detected. Keep OFF if you don't use Reaper.", "switch"),
-            "audio_recognition.device_id": Setting("Device ID", int, None, False, "Audio Recognition", "Audio device ID (blank = auto, recommended to keep blank)", "number"),
-            "audio_recognition.device_name": Setting("Device Name", str, "", False, "Audio Recognition", "Preferred device name. Use this only if the correct device is not being auto-selected."),
+            # Audio Recognition (UDP input)
+            "audio_recognition.enabled": Setting("Audio Recognition", bool, True, False, "UDP Recognition", "Enable UDP audio fingerprinting on startup.", "switch"),
             "audio_recognition.capture_duration": Setting("Capture Duration", float, 6.0, False, "Audio Recognition", "Audio capture length (s)", "slider", min_val=3.0, max_val=60.0),
             "audio_recognition.recognition_interval": Setting("Recognition Interval", float, 4.0, False, "Audio Recognition", "Time (gap) between recognitions (s)", "slider", min_val=1.0, max_val=30.0),
             "audio_recognition.latency_offset": Setting("Latency Offset", float, 0.0, False, "Audio Recognition", "Manual latency adjustment (s)", "slider", min_val=-5.0, max_val=5.0),
             "audio_recognition.silence_threshold": Setting("Silence Threshold", int, 350, False, "Audio Recognition", "Min amplitude to detect audio", "slider", min_val=50, max_val=2000),
             "audio_recognition.verification_cycles": Setting("Verification Cycles", int, 2, False, "Audio Recognition", "Shazam matches needed to accept new song (1=instant)", "number", min_val=1, max_val=5),
             "audio_recognition.verification_timeout_cycles": Setting("Verification Timeout", int, 4, False, "Audio Recognition", "Clear pending if no confirmation in N cycles", "number", min_val=2, max_val=10),
-            "audio_recognition.reaper_validation_enabled": Setting("Reaper Validation", bool, False, False, "Audio Recognition", "Validate against Reaper window title", "switch"),
-            "audio_recognition.reaper_validation_threshold": Setting("Reaper Match Threshold", int, 80, False, "Audio Recognition", "Fuzzy match score (0-100) for Reaper validation", "number", min_val=50, max_val=100),
 
             # UDP Audio Recognition
-            "udp_audio.enabled": Setting("UDP Audio Enabled", bool, False, False, "UDP Recognition", "Receive audio for fingerprinting over UDP", "switch"),
+            "udp_audio.enabled": Setting("UDP Audio Enabled", bool, True, False, "UDP Recognition", "Receive audio for fingerprinting over UDP", "switch"),
             "udp_audio.port": Setting("UDP Port", int, 6056, False, "UDP Recognition", "UDP port to listen for audio data", "number", min_val=1024, max_val=65535),
             "udp_audio.sample_rate": Setting("Sample Rate", int, 16000, False, "UDP Recognition", "Sample rate of incoming UDP audio (Hz)", "number", min_val=8000, max_val=48000),
             "udp_audio.lock_position": Setting("Lock Position", bool, True, False, "UDP Recognition", "Lock to the position from the first recognition of a new track. Prevents repeating choruses from confusing the offset.", "switch"),
             "udp_audio.lock_position_after": Setting("Lock Position After N Consensus", int, 3, False, "UDP Recognition", "Number of consecutive recognition events that must agree before position is locked", "number", min_val=2, max_val=10),
             "udp_audio.lock_consensus_tolerance": Setting("Lock Consensus Tolerance (s)", float, 3.0, False, "UDP Recognition", "Maximum allowed difference (seconds) between consecutive sync samples for consensus", "number", min_val=0.5, max_val=10.0),
 
-            # HTTPS Settings (for browser microphone access)
-            "server.https.enabled": Setting("HTTPS Enabled", bool, True, True, "HTTPS", "Enable HTTPS (required for browser mic)", "switch"),
+            # HTTPS Settings
+            "server.https.enabled": Setting("HTTPS Enabled", bool, True, True, "HTTPS", "Enable HTTPS for the web UI", "switch"),
             "server.https.port": Setting("HTTPS Port", int, 9013, True, "HTTPS", "HTTPS port (0 = same as HTTP, >0 = dual-stack, 9013 is default)", "number"),
             "server.https.auto_generate": Setting("Auto Generate Cert", bool, True, False, "HTTPS", "Auto-generate self-signed certificate", "switch"),
             "server.https.cert_file": Setting("Cert File", str, "certs/server.crt", True, "HTTPS", "SSL certificate file path"),

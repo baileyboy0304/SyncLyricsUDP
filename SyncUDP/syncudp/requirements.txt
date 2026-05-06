@@ -6,14 +6,6 @@ pystray>=0.19.4
 python-benedict>=0.31.0
 desktop-notifier>=3.5.6
 
-# Platform Specific
-winsdk>=1.0.0b9; platform_system == "Windows"
-pywin32>=306; platform_system == "Windows"
-pycaw; platform_system == "Windows"
-
-# dbus-next>=0.2.3; platform_system == "Linux"
-# python-xlib>=0.33; platform_system == "Linux"
-
 # Flask Dependencies
 werkzeug>=3.0.0
 jinja2>=3.1.2
@@ -44,10 +36,8 @@ pyinstaller>=6.0.0
 zeroconf>=0.131.0
 spotipy>=2.23.0
 
-# Audio Recognition (Reaper Integration)
+# Audio Recognition (UDP input)
 shazamio>=0.8.1            # Audio fingerprinting via Shazam
-sounddevice>=0.5.0         # Cross-platform audio capture
-psutil>=5.9.0              # Process detection for Reaper (optional, has fallbacks)
 cryptography>=41.0.0  # Required for HTTPS support
 # scipy removed - using numpy fallback for audio resampling (saves ~100MB)
 

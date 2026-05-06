@@ -174,11 +174,10 @@ async def get_current_song_meta_data() -> Optional[dict]:
     CRITICAL FIX: Uses a lock to prevent concurrent execution.
     Checks if song changed before using cache to prevent stale metadata.
     """
-    # Import platform-specific fetchers here to avoid circular imports
-    from .windows import _get_current_song_meta_data_windows
-    from .spotify import _get_current_song_meta_data_spotify
-    # Note: Linux now uses plugin system (system_utils/sources/linux.py), no legacy import needed
-    
+    # UDP-only build: legacy desktop/app metadata fetchers are not initialized.
+    _get_current_song_meta_data_windows = None
+    _get_current_song_meta_data_spotify = None
+
     # ========================================================================
     # FIX C1: Run auto_manage BEFORE acquiring lock (fire-and-forget)
     # This prevents Reaper detection from blocking all metadata requests

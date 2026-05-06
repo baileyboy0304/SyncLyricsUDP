@@ -64,7 +64,7 @@ class MacOSSource(BaseMetadataSource):
             name="macos",
             display_name="macOS (Now Playing)",
             platforms=["Darwin"],  # Only available on macOS
-            default_enabled=True,  # Enabled by default on macOS
+            default_enabled=False,  # Disabled in UDP-only add-on
             default_priority=1,    # High priority (main source on macOS)
             paused_timeout=600,    # 10 minutes
         )

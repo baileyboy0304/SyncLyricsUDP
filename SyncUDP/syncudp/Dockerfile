@@ -11,9 +11,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libjpeg-dev \
     zlib1g-dev \
     libffi-dev \
-    libasound2-dev \
-    libportaudio2 \
-    portaudio19-dev \
     ffmpeg \
     pkg-config \
     && rm -rf /var/lib/apt/lists/*
@@ -31,7 +28,6 @@ RUN sed -i '/winsdk/d' requirements.txt && \
     sed -i '/pyinstaller/d' requirements.txt && \
     sed -i '/matplotlib/d' requirements.txt && \
     sed -i '/scipy/d' requirements.txt && \
-    sed -i '/psutil/d' requirements.txt && \
     pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
@@ -45,8 +41,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libjpeg62-turbo \
     zlib1g \
     libffi8 \
-    libasound2 \
-    libportaudio2 \
     ffmpeg \
     jq \
     && rm -rf /var/lib/apt/lists/* \

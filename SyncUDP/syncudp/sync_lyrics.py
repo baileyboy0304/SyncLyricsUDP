@@ -666,13 +666,11 @@ async def main() -> NoReturn:
         auto_discover=PLAYERS.get("auto_discover", True),
     )
 
-    multi_instance_mode = UDP_AUDIO.get("enabled", False)
+    multi_instance_mode = UDP_AUDIO.get("enabled", False) and AUDIO_RECOGNITION.get("enabled", True)
 
     if multi_instance_mode:
         try:
             from audio_recognition.player_manager import get_player_manager
-            from system_utils.metadata import set_audio_rec_runtime_enabled
-            set_audio_rec_runtime_enabled(True, False)
             manager = get_player_manager()
             await manager.start(
                 players=get_registry().list_players(),
@@ -690,31 +688,7 @@ async def main() -> NoReturn:
         except Exception as e:
             logger.error(f"Failed to start PlayerManager: {e}", exc_info=True)
     else:
-        # Start audio recognition if --reaper flag was used
-        # Check runtime flag (set by --reaper or config) to avoid importing audio_recognition unnecessarily
-        from system_utils.metadata import _audio_rec_runtime_enabled
-        if _audio_rec_runtime_enabled:
-            try:
-                from system_utils.reaper import get_reaper_source
-                source = get_reaper_source()
-                await source.start(manual=True)
-                logger.info("Audio recognition started (--reaper mode)")
-            except Exception as e:
-                logger.error(f"Failed to start audio recognition: {e}")
-                # Disable audio rec for this session to prevent further attempts
-                from system_utils.metadata import set_audio_rec_runtime_enabled
-                set_audio_rec_runtime_enabled(False, False)
-                logger.info("Audio recognition disabled for this session")
-
-        # Start Reaper auto-detect background task if enabled in settings
-        # This is SEPARATE from --reaper flag - runs a lightweight check every 30s
-        if AUDIO_RECOGNITION.get("reaper_auto_detect", False):
-            try:
-                from system_utils.reaper import start_reaper_auto_detect
-                await start_reaper_auto_detect()
-                logger.info("Reaper auto-detect enabled")
-            except Exception as e:
-                logger.error(f"Failed to start Reaper auto-detect: {e}")
+        logger.info("UDP recognition is disabled; no alternate local input sources are started.")
 
     # Get active display methods
     # CRITICAL FIX: Use .get() with default to prevent crash if state file is missing representationMethods key
@@ -805,24 +779,7 @@ async def main() -> NoReturn:
         await cleanup()
 
 if __name__ == "__main__":
-    # Parse command line arguments
-    import argparse
-    parser = argparse.ArgumentParser(description='SyncLyrics - Real-time lyrics display')
-    parser.add_argument('--reaper', action='store_true', 
-                        help='Enable Reaper DAW audio recognition mode')
-    args = parser.parse_args()
-    
-    # Handle --reaper flag: Enable audio recognition and start immediately
-    # The engine starts NOW, not when Reaper is detected
-    if args.reaper:
-        from config import AUDIO_RECOGNITION
-        AUDIO_RECOGNITION['enabled'] = True
-        AUDIO_RECOGNITION['reaper_auto_detect'] = False  # Not needed - we start immediately
-        # Set runtime flags for event-driven approach
-        from system_utils.metadata import set_audio_rec_runtime_enabled
-        set_audio_rec_runtime_enabled(True, False)
-        print("🎵 Reaper mode: Audio recognition will start after server launch")
-    
+    # UDP-only add-on: no command-line source selection is supported.
     # Set up logging
     setup_logging(
         console_level=DEBUG.get("log_level", "INFO"),
@@ -831,17 +788,6 @@ if __name__ == "__main__":
         log_file=DEBUG.get("log_file", "synclyrics.log"),
         log_providers=DEBUG.get("log_providers", True)
     )
-    
-    # Initialize runtime flags from config (if --reaper wasn't used)
-    # This ensures settings.json values are respected for audio recognition
-    if not args.reaper:
-        from config import AUDIO_RECOGNITION
-        from system_utils.metadata import set_audio_rec_runtime_enabled
-        enabled = AUDIO_RECOGNITION.get("enabled", False)
-        auto_detect = AUDIO_RECOGNITION.get("reaper_auto_detect", False)
-        if enabled or auto_detect:
-            set_audio_rec_runtime_enabled(enabled, auto_detect)
-            logger.debug(f"Audio rec runtime flags from config: enabled={enabled}, auto_detect={auto_detect}")
     
     def handle_interrupt(signum=None, frame=None):
         """Handle keyboard interrupt (works for both signal.signal and loop.add_signal_handler)"""
