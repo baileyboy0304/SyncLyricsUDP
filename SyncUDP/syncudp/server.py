@@ -619,6 +619,22 @@ async def current_track() -> dict:
         )
         scoped["is_instrumental"] = False
         scoped["is_instrumental_manual"] = False
+        # Drive the on-screen timeline from the linked Music Assistant
+        # player rather than the recognition engine, which never has a real
+        # duration and only updates on each match. Falls through silently
+        # when MA isn't reachable for this player.
+        try:
+            ma_player_id = await _resolve_ma_player_id_for_request()
+            if ma_player_id:
+                from system_utils.sources.music_assistant import MusicAssistantSource
+                ma_meta = await MusicAssistantSource(target_player_id=ma_player_id).get_metadata()
+                if ma_meta:
+                    for key in ("position", "duration_ms", "is_playing"):
+                        value = ma_meta.get(key)
+                        if value is not None:
+                            scoped[key] = value
+        except Exception as exc:
+            logger.debug(f"MA timeline override failed: {exc}")
         return scoped
 
     try:
@@ -1982,75 +1998,85 @@ async def get_cover_art():
     
     return "", 404
 
-def _resolve_ma_player_id_from_request() -> Optional[str]:
-    """Map the frontend ``?player=<name>`` query param to a Music Assistant
-    player_id via the multi-instance player registry.
+async def _resolve_ma_player_id_for_request() -> Optional[str]:
+    """Resolve the ``?player=<name>`` query param to a concrete MA player_id.
 
-    The web UI lets users pin a specific RTP player (top-right pill); the
-    transport buttons should then drive whatever Music Assistant device that
-    player is linked to instead of the globally-active queue. Returns ``None``
-    when no player is selected or no MA link is configured.
+    The web UI pins an RTP player in the top-right pill; transport must
+    drive *that* player. Resolution order, no guards:
+
+      1. ``music_assistant_player_id`` recorded against the player in the
+         multi-instance registry (set when the user links an MA player via
+         the rename UI).
+      2. A MA player whose ``player_id``, ``display_name`` or ``name``
+         matches the pinned name (covers the common case where the RTP
+         player and the MA player share a name and no manual link exists).
+      3. The pinned name itself, passed straight through. MA will reject
+         it if invalid; the caller surfaces that as an error toast.
+
+    Returns ``None`` only when the URL did not include a ``?player=``.
     """
     player_name = (request.args.get('player') or '').strip()
     if not player_name:
         return None
+
     try:
         from audio_recognition.player_registry import get_registry
         cfg = get_registry().get(player_name)
-    except Exception:
-        return None
-    if cfg and cfg.music_assistant_player_id:
-        return cfg.music_assistant_player_id
-    return None
+        if cfg and cfg.music_assistant_player_id:
+            return cfg.music_assistant_player_id
+    except Exception as exc:
+        logger.debug(f"Player registry lookup failed for {player_name!r}: {exc}")
+
+    try:
+        from system_utils.sources import music_assistant as ma_module
+        if await ma_module._ensure_connected_nonblocking() and ma_module._client:
+            for player in ma_module._client.players.players:
+                pid = getattr(player, 'player_id', '') or ''
+                names = {
+                    pid,
+                    getattr(player, 'display_name', '') or '',
+                    getattr(player, 'name', '') or '',
+                }
+                if player_name in names:
+                    return pid
+    except Exception as exc:
+        logger.debug(f"MA name lookup failed for {player_name!r}: {exc}")
+
+    return player_name
 
 
 async def _music_assistant_source_for_controls():
-    """Build a MusicAssistantSource for transport commands.
+    """Always hand back a MusicAssistantSource for transport commands.
 
-    In the UDP-only build the metadata pipeline reports ``source=udp`` /
-    ``audio_recognition`` even though the audio is actually streaming from
-    a Music Assistant player, so we don't gate on that source. As long as
-    MA itself is configured we hand back a source; the helper inside
-    ``MusicAssistantSource`` will pick the playing MA queue.
-
-    Priority for which MA queue the controls drive:
-      1. Player selected in the UI (``?player=<name>``) and linked to an
-         MA player in the registry — controls target that device.
-      2. The currently playing / last-active MA player, via the source's
-         own auto-detection.
+    Routes commands at whichever player ``?player=<name>`` resolves to;
+    otherwise lets the source auto-detect the active MA queue. No guards
+    on metadata source or MA configuration — failures bubble up so the
+    UI can show a clear error toast.
     """
-    from system_utils.sources.music_assistant import MusicAssistantSource, is_configured
-    if not is_configured():
-        return None
-    target_ma_id = _resolve_ma_player_id_from_request()
-    return MusicAssistantSource(target_player_id=target_ma_id) if target_ma_id else MusicAssistantSource()
+    from system_utils.sources.music_assistant import MusicAssistantSource
+    target_ma_id = await _resolve_ma_player_id_for_request()
+    return MusicAssistantSource(target_player_id=target_ma_id)
 
 
 @app.route("/api/playback/play-pause", methods=['POST'])
 async def toggle_playback():
     ma_source = await _music_assistant_source_for_controls()
-    if not ma_source:
-        return jsonify({"error": "Playback control is not available for fixed UDP input"}), 410
     success = await ma_source.toggle_playback()
-    return jsonify({"status": "success", "message": "Toggled (music_assistant)"}) if success else (jsonify({"error": "Music Assistant playback control failed"}), 500)
+    return jsonify({"status": "success"}) if success else (jsonify({"error": "Music Assistant playback control failed"}), 500)
 
 
 @app.route("/api/playback/next", methods=['POST'])
 async def next_track():
     ma_source = await _music_assistant_source_for_controls()
-    if not ma_source:
-        return jsonify({"error": "Playback control is not available for fixed UDP input"}), 410
     success = await ma_source.next_track()
-    return jsonify({"status": "success", "message": "Next (music_assistant)"}) if success else (jsonify({"error": "Music Assistant next failed"}), 500)
+    return jsonify({"status": "success"}) if success else (jsonify({"error": "Music Assistant next failed"}), 500)
 
 
 @app.route("/api/playback/previous", methods=['POST'])
 async def previous_track():
     ma_source = await _music_assistant_source_for_controls()
-    if not ma_source:
-        return jsonify({"error": "Playback control is not available for fixed UDP input"}), 410
     success = await ma_source.previous_track()
-    return jsonify({"status": "success", "message": "Previous (music_assistant)"}) if success else (jsonify({"error": "Music Assistant previous failed"}), 500)
+    return jsonify({"status": "success"}) if success else (jsonify({"error": "Music Assistant previous failed"}), 500)
 
 
 @app.route("/api/playback/seek", methods=['POST'])
@@ -2060,8 +2086,6 @@ async def seek_playback():
     if position_ms is None:
         return jsonify({"error": "position_ms required"}), 400
     ma_source = await _music_assistant_source_for_controls()
-    if not ma_source:
-        return jsonify({"error": "Seeking is not available for fixed UDP input"}), 410
     success = await ma_source.seek(position_ms)
     return jsonify({"status": "success", "position_ms": position_ms}) if success else (jsonify({"error": "Music Assistant seek failed"}), 500)
 
@@ -2069,8 +2093,6 @@ async def seek_playback():
 @app.route("/api/playback/queue", methods=['GET'])
 async def get_playback_queue():
     ma_source = await _music_assistant_source_for_controls()
-    if not ma_source:
-        return jsonify({"current": None, "queue": [], "source": "udp"})
     queue_data = await ma_source.get_queue()
     return jsonify({
         "current": (queue_data or {}).get('current'),
@@ -2085,8 +2107,6 @@ async def check_liked_status():
     if not track_id:
         return jsonify({"error": "No track_id provided"}), 400
     ma_source = await _music_assistant_source_for_controls()
-    if not ma_source:
-        return jsonify({"liked": False, "source": "udp"})
     return jsonify({"liked": await ma_source.is_favorite(track_id)})
 
 
@@ -2098,8 +2118,6 @@ async def toggle_liked_status():
     if not track_id or not action:
         return jsonify({"error": "Missing parameters"}), 400
     ma_source = await _music_assistant_source_for_controls()
-    if not ma_source:
-        return jsonify({"error": "Favorites are only available through Music Assistant in the UDP-only add-on"}), 410
     if action == 'like':
         success = await ma_source.add_to_favorites(track_id)
     elif action == 'unlike':
@@ -2185,14 +2203,12 @@ async def transfer_playback():
 @app.route("/api/playback/volume", methods=['GET'])
 async def get_volume():
     """Return Music Assistant volume for the selected/active player."""
-    volumes = {}
+    ma_source = await _music_assistant_source_for_controls()
     try:
-        ma_source = await _music_assistant_source_for_controls()
-        if ma_source:
-            volumes['music_assistant'] = await ma_source.get_volume()
+        return jsonify({"music_assistant": await ma_source.get_volume()})
     except Exception as e:
         logger.debug(f"Could not get MA volume: {e}")
-    return jsonify(volumes)
+        return jsonify({})
 
 
 @app.route("/api/playback/volume", methods=['POST'])
@@ -2202,20 +2218,12 @@ async def set_volume():
     Body: {"source": "music_assistant", "volume": 0-100}
     """
     data = await request.get_json()
-    source = data.get('source')
     volume = data.get('volume')
-
-    if source != 'music_assistant':
-        return jsonify({"error": "Invalid source"}), 400
-
     if volume is None or not isinstance(volume, (int, float)):
         return jsonify({"error": "volume required (0-100)"}), 400
-
     volume = int(max(0, min(100, volume)))
 
     ma_source = await _music_assistant_source_for_controls()
-    if not ma_source:
-        return jsonify({"error": "Music Assistant not available"}), 410
     success = await ma_source.set_volume(volume)
     if success:
         return jsonify({"status": "success", "source": "music_assistant", "volume": volume})
@@ -2224,11 +2232,8 @@ async def set_volume():
 
 @app.route("/api/playback/shuffle", methods=['POST'])
 async def set_shuffle():
-    """Set Music Assistant shuffle when MA is the active metadata source."""
     data = await request.get_json() or {}
     ma_source = await _music_assistant_source_for_controls()
-    if not ma_source:
-        return jsonify({"error": "Shuffle control is not available for fixed UDP input"}), 410
     if 'state' not in data:
         current_shuffle = await ma_source.get_shuffle()
         state = not current_shuffle if current_shuffle is not None else True
@@ -2240,11 +2245,8 @@ async def set_shuffle():
 
 @app.route("/api/playback/repeat", methods=['POST'])
 async def set_repeat():
-    """Set Music Assistant repeat when MA is the active metadata source."""
     data = await request.get_json() or {}
     ma_source = await _music_assistant_source_for_controls()
-    if not ma_source:
-        return jsonify({"error": "Repeat control is not available for fixed UDP input"}), 410
     if 'mode' not in data:
         current_repeat = await ma_source.get_repeat() or 'off'
         cycle = {'off': 'context', 'context': 'track', 'track': 'off'}
