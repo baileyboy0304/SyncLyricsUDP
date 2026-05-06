@@ -2005,23 +2005,25 @@ def _resolve_ma_player_id_from_request() -> Optional[str]:
 
 
 async def _music_assistant_source_for_controls():
-    """Build a MusicAssistantSource scoped to the request's selected player.
+    """Build a MusicAssistantSource for transport commands.
+
+    In the UDP-only build the metadata pipeline reports ``source=udp`` /
+    ``audio_recognition`` even though the audio is actually streaming from
+    a Music Assistant player, so we don't gate on that source. As long as
+    MA itself is configured we hand back a source; the helper inside
+    ``MusicAssistantSource`` will pick the playing MA queue.
 
     Priority for which MA queue the controls drive:
-      1. Player selected in the UI (``?player=<name>``) and linked to an MA
-         player in the registry — controls always target that device.
-      2. Whichever source is currently producing metadata, if it is MA.
+      1. Player selected in the UI (``?player=<name>``) and linked to an
+         MA player in the registry — controls target that device.
+      2. The currently playing / last-active MA player, via the source's
+         own auto-detection.
     """
     from system_utils.sources.music_assistant import MusicAssistantSource, is_configured
-    target_ma_id = _resolve_ma_player_id_from_request()
-    if target_ma_id:
-        if not is_configured():
-            return None
-        return MusicAssistantSource(target_player_id=target_ma_id)
-    metadata = await get_current_song_meta_data()
-    if not metadata or metadata.get('source') != 'music_assistant':
+    if not is_configured():
         return None
-    return MusicAssistantSource()
+    target_ma_id = _resolve_ma_player_id_from_request()
+    return MusicAssistantSource(target_player_id=target_ma_id) if target_ma_id else MusicAssistantSource()
 
 
 @app.route("/api/playback/play-pause", methods=['POST'])
