@@ -118,7 +118,6 @@ from .session_config import (
 # Note: Platform-specific functions (windows.py, spotify.py) are
 # intentionally NOT re-exported at the package level. They are internal
 # implementation details called by get_current_song_meta_data.
-# Linux support uses the plugin system (sources/linux.py).
 
 # ============================================================================
 # __all__ for explicit public API

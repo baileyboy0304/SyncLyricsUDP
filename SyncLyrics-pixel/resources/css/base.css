@@ -2573,14 +2573,18 @@ a.settings-header-btn {
     /* Initial fallback values (JS overrides these) */
     bottom: 24px;
     right: 125px;
-    z-index: 150;
+    z-index: 260;
     display: flex;
     align-items: center;
-    gap: 2px;
-    padding: 0;
-    background: transparent;
-    border: none;
-    transition: right 0.15s ease, top 0.15s ease;  /* Smooth repositioning */
+    gap: 6px;
+    padding: 6px 8px;
+    background: rgba(10, 10, 18, 0.72);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 999px;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    transition: right 0.15s ease, top 0.15s ease, opacity 0.15s ease;  /* Smooth repositioning */
 }
 
 /* Hidden state */
@@ -2588,10 +2592,11 @@ a.settings-header-btn {
     display: none;
 }
 
-/* Hide on mobile/tablet (below 850px) */
+/* Keep timing controls reachable in narrower Home Assistant panels. */
 @media (max-width: 850px) {
     .main-latency-controls {
-        display: none !important;
+        right: 14px;
+        bottom: 88px;
     }
 }
 
@@ -2611,8 +2616,8 @@ body.art-only-mode .main-latency-controls {
     height: 20px;
     border-radius: 50%;
     border: none;
-    background: transparent;
-    color: rgba(255, 255, 255, 0.4);
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.9);
     font-size: 0.85rem;
     font-weight: 500;
     cursor: pointer;
@@ -2642,7 +2647,7 @@ body.art-only-mode .main-latency-controls {
     text-align: center;
     font-size: 0.65rem;
     font-weight: 500;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.85);
     font-variant-numeric: tabular-nums;
 }
 
