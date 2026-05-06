@@ -372,9 +372,34 @@ class MusicAssistantSource(BaseMetadataSource):
     - system.music_assistant.paused_timeout: Seconds before paused state expires
     """
     
-    def __init__(self):
+    def __init__(self, target_player_id: Optional[str] = None):
         super().__init__()
         self._last_active_time = 0
+        self._target_player_id = (target_player_id or "").strip() or None
+
+    def _resolve_player_id(self) -> Optional[str]:
+        """Pick the MA player id for control commands (volume, devices, etc.).
+
+        Mirrors :meth:`_resolve_queue_id` but for player-scoped operations.
+        """
+        if self._target_player_id:
+            return self._target_player_id
+        return _get_target_player_id()
+
+    async def _resolve_queue_id(self) -> Optional[str]:
+        """Pick the MA queue id for control commands.
+
+        When the source was constructed with an explicit ``target_player_id``
+        (multi-player mode: the request is scoped to a specific player), we
+        always resolve the queue from that player so commands operate on the
+        UI-selected device. Otherwise we fall back to whichever queue/player
+        the metadata poll most recently observed.
+        """
+        if self._target_player_id:
+            if not _client:
+                return None
+            return await _get_active_queue_id(self._target_player_id)
+        return _current_queue_id or _current_player_id
     
     @classmethod
     def get_config(cls) -> SourceConfig:
@@ -439,7 +464,7 @@ class MusicAssistantSource(BaseMetadataSource):
         
         try:
             # Get target player
-            player_id = _get_target_player_id()
+            player_id = self._resolve_player_id()
             if not player_id:
                 # Rate limit this log to avoid spam
                 global _last_no_player_log
@@ -602,7 +627,7 @@ class MusicAssistantSource(BaseMetadataSource):
             return False
         
         try:
-            queue_id = _current_queue_id or _current_player_id
+            queue_id = await self._resolve_queue_id()
             if not queue_id:
                 return False
             
@@ -619,7 +644,7 @@ class MusicAssistantSource(BaseMetadataSource):
             return False
         
         try:
-            queue_id = _current_queue_id or _current_player_id
+            queue_id = await self._resolve_queue_id()
             if not queue_id:
                 return False
             
@@ -635,7 +660,7 @@ class MusicAssistantSource(BaseMetadataSource):
             return False
         
         try:
-            queue_id = _current_queue_id or _current_player_id
+            queue_id = await self._resolve_queue_id()
             if not queue_id:
                 return False
             
@@ -651,7 +676,7 @@ class MusicAssistantSource(BaseMetadataSource):
             return False
         
         try:
-            queue_id = _current_queue_id or _current_player_id
+            queue_id = await self._resolve_queue_id()
             if not queue_id:
                 return False
             
@@ -667,7 +692,7 @@ class MusicAssistantSource(BaseMetadataSource):
             return False
         
         try:
-            queue_id = _current_queue_id or _current_player_id
+            queue_id = await self._resolve_queue_id()
             if not queue_id:
                 return False
             
@@ -683,7 +708,7 @@ class MusicAssistantSource(BaseMetadataSource):
             return False
         
         try:
-            queue_id = _current_queue_id or _current_player_id
+            queue_id = await self._resolve_queue_id()
             if not queue_id:
                 return False
             
@@ -706,7 +731,7 @@ class MusicAssistantSource(BaseMetadataSource):
             return None
         
         try:
-            queue_id = _current_queue_id or _current_player_id
+            queue_id = await self._resolve_queue_id()
             if not queue_id:
                 return None
             
@@ -798,7 +823,7 @@ class MusicAssistantSource(BaseMetadataSource):
         
         try:
             # Get the current queue to check the playing item's favorite status
-            queue_id = _current_queue_id or _current_player_id
+            queue_id = await self._resolve_queue_id()
             if not queue_id:
                 return False
             
@@ -842,7 +867,7 @@ class MusicAssistantSource(BaseMetadataSource):
         try:
             # Get the current queue to access the media_item object
             # The add_item command needs the actual media item, not just the ID
-            queue_id = _current_queue_id or _current_player_id
+            queue_id = await self._resolve_queue_id()
             if queue_id:
                 queue = _client.player_queues.get(queue_id)
                 if queue and queue.current_item and queue.current_item.media_item:
@@ -911,7 +936,7 @@ class MusicAssistantSource(BaseMetadataSource):
             return None
         
         try:
-            player_id = _get_target_player_id()
+            player_id = self._resolve_player_id()
             if not player_id:
                 return None
             
@@ -940,7 +965,7 @@ class MusicAssistantSource(BaseMetadataSource):
         volume = max(0, min(100, volume))
         
         try:
-            player_id = _get_target_player_id()
+            player_id = self._resolve_player_id()
             if not player_id:
                 return False
             
@@ -963,7 +988,7 @@ class MusicAssistantSource(BaseMetadataSource):
             return None
         
         try:
-            player_id = _get_target_player_id()
+            player_id = self._resolve_player_id()
             if not player_id:
                 return None
             
@@ -992,7 +1017,7 @@ class MusicAssistantSource(BaseMetadataSource):
             return False
         
         try:
-            player_id = _get_target_player_id()
+            player_id = self._resolve_player_id()
             if not player_id:
                 return False
             
@@ -1019,7 +1044,7 @@ class MusicAssistantSource(BaseMetadataSource):
             return None
         
         try:
-            player_id = _get_target_player_id()
+            player_id = self._resolve_player_id()
             if not player_id:
                 return None
             
@@ -1062,7 +1087,7 @@ class MusicAssistantSource(BaseMetadataSource):
                 logger.warning(f"Invalid repeat mode: {mode}")
                 return False
             
-            player_id = _get_target_player_id()
+            player_id = self._resolve_player_id()
             if not player_id:
                 return False
             
@@ -1093,7 +1118,7 @@ class MusicAssistantSource(BaseMetadataSource):
         
         try:
             devices = []
-            current_player_id = _get_target_player_id()
+            current_player_id = self._resolve_player_id()
             
             for player in _client.players:
                 devices.append({
@@ -1123,7 +1148,7 @@ class MusicAssistantSource(BaseMetadataSource):
             return False
         
         try:
-            source_player_id = _get_target_player_id()
+            source_player_id = self._resolve_player_id()
             if not source_player_id:
                 return False
             
