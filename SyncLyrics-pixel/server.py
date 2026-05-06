@@ -450,6 +450,53 @@ def _player_name_from_request() -> Optional[str]:
     return name or None
 
 
+def _get_music_assistant_player_id_for_player(player_name: Optional[str]) -> Optional[str]:
+    """Return the linked Music Assistant player id for a SyncLyrics player."""
+    if not player_name:
+        return None
+    try:
+        from audio_recognition.player_registry import get_registry
+        for player in get_registry().list_players():
+            if player.name == player_name:
+                return player.music_assistant_player_id
+    except Exception as exc:
+        logger.debug(f"Could not resolve MA player link for {player_name}: {exc}")
+    return None
+
+
+async def _run_music_assistant_player_command(
+    command: str,
+    player_id: Optional[str],
+    position_ms: Optional[int] = None,
+) -> Optional[bool]:
+    """Run a Music Assistant control command against a specific MA player id.
+
+    Returns None when no linked player was supplied, otherwise True/False for
+    command success. This keeps scoped UDP/audio-recognition players routable to
+    their linked Music Assistant transport controls.
+    """
+    if not player_id:
+        return None
+
+    try:
+        from system_utils.sources.music_assistant import MusicAssistantSource
+        ma_source = MusicAssistantSource()
+        if command == "play-pause":
+            return await ma_source.toggle_playback(player_id=player_id)
+        if command == "next":
+            return await ma_source.next_track(player_id=player_id)
+        if command == "previous":
+            return await ma_source.previous_track(player_id=player_id)
+        if command == "seek":
+            if position_ms is None:
+                return False
+            return await ma_source.seek(position_ms, player_id=player_id)
+    except Exception as exc:
+        logger.debug(f"Music Assistant scoped {command} failed for {player_id}: {exc}")
+        return False
+
+    return False
+
 def _build_player_track_payload(player_name: str) -> Optional[dict]:
     """
     Build a /current-track-compatible payload directly from a player's
@@ -467,9 +514,12 @@ def _build_player_track_payload(player_name: str) -> Optional[dict]:
     duration_sec = duration_ms / 1000.0 if duration_ms else 0
     artist = song.get("artist", "")
     title = song.get("title", "")
+    linked_ma_player_id = _get_music_assistant_player_id_for_player(player_name)
     metadata = {
         "source": "audio_recognition",
         "player": player_name,
+        "controls_source": "music_assistant" if linked_ma_player_id else None,
+        "can_control": bool(linked_ma_player_id),
         "artist": artist,
         "title": title,
         "album": song.get("album"),
@@ -2170,6 +2220,13 @@ async def toggle_playback():
     # Debug logging for routing decisions
     app_id = metadata.get('app_id', 'N/A') if metadata else 'N/A'
     logger.debug(f"Playback toggle - source: {source}, app_id: {app_id}")
+
+    scoped_ma_player_id = _get_music_assistant_player_id_for_player(_player_name_from_request())
+    scoped_success = await _run_music_assistant_player_command("play-pause", scoped_ma_player_id)
+    if scoped_success is not None:
+        if scoped_success:
+            return jsonify({"status": "success", "message": "Toggled (Music Assistant)"})
+        return jsonify({"error": "Music Assistant playback control failed"}), 500
     
     # Windows source uses Windows playback controls
     if source == 'windows_media':
@@ -2254,6 +2311,13 @@ async def next_track():
     source = metadata.get('source') if metadata else None
     
     logger.debug(f"Playback next - source: {source}")
+
+    scoped_ma_player_id = _get_music_assistant_player_id_for_player(_player_name_from_request())
+    scoped_success = await _run_music_assistant_player_command("next", scoped_ma_player_id)
+    if scoped_success is not None:
+        if scoped_success:
+            return jsonify({"status": "success", "message": "Skipped (Music Assistant)"})
+        return jsonify({"error": "Music Assistant playback control failed"}), 500
     
     if source == 'windows_media':
         from system_utils.windows import windows_next
@@ -2307,6 +2371,13 @@ async def previous_track():
     source = metadata.get('source') if metadata else None
     
     logger.debug(f"Playback previous - source: {source}")
+
+    scoped_ma_player_id = _get_music_assistant_player_id_for_player(_player_name_from_request())
+    scoped_success = await _run_music_assistant_player_command("previous", scoped_ma_player_id)
+    if scoped_success is not None:
+        if scoped_success:
+            return jsonify({"status": "success", "message": "Previous (Music Assistant)"})
+        return jsonify({"error": "Music Assistant playback control failed"}), 500
     
     if source == 'windows_media':
         from system_utils.windows import windows_previous
@@ -2373,6 +2444,13 @@ async def seek_playback():
     
     # Debug logging for routing decisions
     logger.debug(f"Seek to {position_ms}ms - source: {source}")
+
+    scoped_ma_player_id = _get_music_assistant_player_id_for_player(_player_name_from_request())
+    scoped_success = await _run_music_assistant_player_command("seek", scoped_ma_player_id, position_ms=position_ms)
+    if scoped_success is not None:
+        if scoped_success:
+            return jsonify({"status": "success", "message": f"Seeked to {position_ms}ms (Music Assistant)"})
+        return jsonify({"error": "Music Assistant seek failed"}), 500
     
     # Windows source uses Windows playback controls
     if source == 'windows_media':
