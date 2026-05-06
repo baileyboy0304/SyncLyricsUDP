@@ -742,107 +742,8 @@ async def reload_settings():
 
 @app.route('/api/playback/audio-analysis')
 async def get_audio_analysis():
-    """
-    Get audio analysis for current track (waveform + spectrum data).
-    Used by frontend for waveform seekbar and spectrum visualizer.
-    
-    Data sources:
-    1. Cached audio-analysis database (if available)
-    
-    Returns:
-        - waveform: List of {start, amp} where amp is normalized 0-1
-        - segments: List of {start, duration, pitches} for spectrum visualizer
-        - beats: List of {start, duration, confidence} for beat-reactive effects
-        - sections: List of sections for energy scaling
-        - duration: Track duration in seconds
-        - analysis_track_id: Normalized track ID for frontend validation
-    """
-    import asyncio
-    from system_utils.spicetify_db import load_from_db
-    from system_utils.helpers import _normalize_track_id
-    
-    analysis = None
-    analysis_track_id = None
-    
-    # Get current metadata first - we need to know which source is active
-    # and also need artist/title for DB fallback anyway
-    metadata = await get_current_song_meta_data()
-    active_source = metadata.get('source') if metadata else None
-    
-    # Fall back to database cache (works for ANY source)
-    # This finds cached analysis by artist/title.
-    if not analysis and metadata:
-        artist = metadata.get('artist', '')
-        title = metadata.get('title', '')
-        if artist and title:
-            # Non-blocking file I/O using thread pool
-            cached = await asyncio.to_thread(load_from_db, artist, title)
-            if cached and cached.get('audio_analysis'):
-                analysis = cached['audio_analysis']
-                # Compute track ID from the metadata we used to load
-                # This ensures frontend validation works correctly
-                analysis_track_id = _normalize_track_id(artist, title)
-                logger.info(f"Loaded audio analysis from cache: {artist} - {title} (source: {active_source})")
-            else:
-                logger.debug(f"No cached audio analysis for: {artist} - {title}")
-    
-    if not analysis:
-        return jsonify({"error": "No audio analysis available"}), 404
-    
-    # Validate we have segment data
-    if not analysis.get('segments'):
-        return jsonify({"error": "No segments in audio analysis"}), 404
-    
-    segments = analysis.get('segments', [])
-    beats = analysis.get('beats', [])
-    sections = analysis.get('sections', [])
-    duration = analysis.get('duration', 0)
-    
-    # Process waveform: average loudness per segment (RMS-like)
-    # Formula: (loudness_start + loudness_max) / 2, then convert dB to linear
-    waveform = []
-    max_amp = 0
-    
-    for seg in segments:
-        loud_start = max(seg.get('loudness_start', -60), -60)  # Floor at -60dB
-        loud_max = max(seg.get('loudness_max', -60), -60)
-        avg_db = (loud_start + loud_max) / 2
-        amp = pow(10, avg_db / 20)  # dB to linear amplitude
-        max_amp = max(max_amp, amp)
-        waveform.append({
-            'start': round(seg['start'], 3),
-            'amp': amp  # Will normalize after
-        })
-    
-    # Normalize waveform amplitudes to 0-1 range
-    if max_amp > 0:
-        for w in waveform:
-            w['amp'] = round(w['amp'] / max_amp, 3)
-    
-    # Process segments for spectrum: include start, duration, pitches, and timbre
-    spectrum_segments = []
-    for seg in segments:
-        spectrum_segments.append({
-            'start': round(seg.get('start', 0), 3),
-            'duration': round(seg.get('duration', 0), 3),
-            'pitches': seg.get('pitches', [0] * 12),
-            'timbre': seg.get('timbre', [0] * 12),
-            'loudness': round(seg.get('loudness_max', -60), 1)
-        })
-    
-    # Return BOTH raw audio_analysis AND processed fields for backward compatibility
-    return jsonify({
-        # NEW: Full raw audio analysis (tempo, key, bars, tatums, etc.)
-        'audio_analysis': analysis,
-        'analysis_track_id': analysis_track_id,
-        # BACKWARD COMPATIBILITY: Processed fields for existing code
-        'waveform': waveform,
-        'segments': spectrum_segments,
-        'beats': beats,
-        'sections': sections,
-        'duration': duration,
-        'segment_count': len(segments)
-    })
+    """Return 404 because legacy Spicetify audio-analysis caches are not bundled."""
+    return jsonify({"error": "No audio analysis available"}), 404
 
 
 # --- PWA Routes ---
@@ -1190,19 +1091,12 @@ async def backfill_art_endpoint():
     
     # Trigger both album art and artist images refetch with force=True
     from system_utils.helpers import create_tracked_task
-    from system_utils.spicetify_db import load_from_db
-    
-    # Load artist_visuals from Spicetify DB (if available for this track)
-    artist_visuals = None
-    spicetify_data = load_from_db(artist, title)
-    if spicetify_data:
-        artist_visuals = spicetify_data.get("artist_visuals")
-    
+
     async def run_refetch():
         # Refetch album art
         await ensure_album_art_db(artist, album, title, spotify_url, retry_count=0, force=True)
-        # Refetch artist images (with Spicetify visuals if available)
-        await ensure_artist_image_db(artist, artist_id, force=True, artist_visuals=artist_visuals)
+        # Refetch artist images
+        await ensure_artist_image_db(artist, artist_id, force=True)
     
     create_tracked_task(run_refetch())
     
@@ -1755,13 +1649,6 @@ async def set_album_art_preference():
     if hasattr(get_current_song_meta_data, '_last_result'):
         get_current_song_meta_data._last_result = None
     
-    # FIX: Also invalidate Spicetify enrichment cache
-    # This ensures album art selection changes take effect immediately for Spicetify source
-    if hasattr(get_current_song_meta_data, '_spicetify_enriched_track'):
-        get_current_song_meta_data._spicetify_enriched_track = None
-    if hasattr(get_current_song_meta_data, '_spicetify_enriched_result'):
-        get_current_song_meta_data._spicetify_enriched_result = None
-    
     # Add cache busting timestamp
     cache_bust = int(time.time())
     
@@ -1840,12 +1727,6 @@ async def clear_album_art_preference():
     if hasattr(get_current_song_meta_data, '_last_result'):
         get_current_song_meta_data._last_result = None
     
-    # FIX: Also invalidate Spicetify enrichment cache
-    if hasattr(get_current_song_meta_data, '_spicetify_enriched_track'):
-        get_current_song_meta_data._spicetify_enriched_track = None
-    if hasattr(get_current_song_meta_data, '_spicetify_enriched_result'):
-        get_current_song_meta_data._spicetify_enriched_result = None
-
     return jsonify({"status": "success", "message": "Art preferences cleared"})
 
 @app.route("/api/album-art/background-style", methods=['POST'])
@@ -1922,13 +1803,6 @@ async def set_background_style():
             # FIX: Clear _last_result to invalidate audio recognition cache (stores background_style with _audio_rec_enriched flag)
             if hasattr(get_current_song_meta_data, '_last_result'):
                 get_current_song_meta_data._last_result = None
-            
-            # FIX: Also invalidate Spicetify enrichment cache which stores background_style separately
-            # Without this, clicking "Auto" doesn't work for Spicetify source (stale cached style persists)
-            if hasattr(get_current_song_meta_data, '_spicetify_enriched_track'):
-                get_current_song_meta_data._spicetify_enriched_track = None
-            if hasattr(get_current_song_meta_data, '_spicetify_enriched_result'):
-                get_current_song_meta_data._spicetify_enriched_result = None
             
             return jsonify({"status": "success", "style": style, "message": f"Saved {style} preference"})
         else:
