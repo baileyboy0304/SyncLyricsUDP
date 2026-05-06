@@ -2030,18 +2030,29 @@ async def _resolve_ma_player_id_for_request() -> Optional[str]:
     try:
         from system_utils.sources import music_assistant as ma_module
         if await ma_module._ensure_connected_nonblocking() and ma_module._client:
+            def _norm(value: str) -> str:
+                return ''.join(ch.lower() for ch in (value or '') if ch.isalnum())
+            target_norm = _norm(player_name)
+            best_id: Optional[str] = None
             for player in ma_module._client.players.players:
                 pid = getattr(player, 'player_id', '') or ''
-                names = {
+                candidates = [
                     pid,
                     getattr(player, 'display_name', '') or '',
                     getattr(player, 'name', '') or '',
-                }
-                if player_name in names:
+                ]
+                if player_name in candidates:
                     return pid
+                if any(_norm(c) == target_norm for c in candidates if c):
+                    best_id = best_id or pid
+            if best_id:
+                return best_id
     except Exception as exc:
         logger.debug(f"MA name lookup failed for {player_name!r}: {exc}")
 
+    # No match — return the raw name so MusicAssistantSource still tries it
+    # and, when MA rejects it, falls back to the active queue rather than
+    # leaving the user with dead buttons.
     return player_name
 
 

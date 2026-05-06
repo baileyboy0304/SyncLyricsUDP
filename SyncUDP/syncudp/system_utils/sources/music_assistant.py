@@ -380,25 +380,29 @@ class MusicAssistantSource(BaseMetadataSource):
     def _resolve_player_id(self) -> Optional[str]:
         """Pick the MA player id for control commands (volume, devices, etc.).
 
-        Mirrors :meth:`_resolve_queue_id` but for player-scoped operations.
+        Honour the explicit ``target_player_id`` only if MA actually knows
+        about that id; otherwise fall through to the global active player
+        so commands still hit a real device when the pinned name doesn't
+        line up with an MA player_id.
         """
-        if self._target_player_id:
-            return self._target_player_id
+        if self._target_player_id and _client is not None:
+            if _client.players.get(self._target_player_id) is not None:
+                return self._target_player_id
         return _get_target_player_id()
 
     async def _resolve_queue_id(self) -> Optional[str]:
         """Pick the MA queue id for control commands.
 
-        When the source was constructed with an explicit ``target_player_id``
-        (multi-player mode: the request is scoped to a specific player), we
-        always resolve the queue from that player so commands operate on the
-        UI-selected device. Otherwise we fall back to whichever queue/player
-        the metadata poll most recently observed.
+        Tries the explicit ``target_player_id`` first (set when the request
+        is scoped to a specific player) and falls back to the globally
+        active queue when MA doesn't recognise the id. The fallback keeps
+        the buttons useful when a UI player hasn't been linked yet.
         """
-        if self._target_player_id:
-            if not _client:
-                return None
-            return await _get_active_queue_id(self._target_player_id)
+        if self._target_player_id and _client is not None:
+            if _client.players.get(self._target_player_id) is not None:
+                queue_id = await _get_active_queue_id(self._target_player_id)
+                if queue_id:
+                    return queue_id
         return _current_queue_id or _current_player_id
     
     @classmethod
