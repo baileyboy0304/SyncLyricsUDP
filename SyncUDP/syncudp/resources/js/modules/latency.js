@@ -1,7 +1,7 @@
 /**
- * latency.js - Per-Song Word-Sync Latency Adjustment
+ * latency.js - Per-Song Timed-Lyrics Latency Adjustment
  * 
- * This module handles user adjustments to word-sync timing for individual songs.
+ * This module handles user adjustments to timed-lyrics playback for individual songs.
  * Offsets are applied immediately and saved to the backend with debouncing.
  * 
  * Level 3 - Imports: state, api, dom
@@ -11,6 +11,7 @@ import {
     songWordSyncOffset,
     setSongWordSyncOffset,
     lastTrackInfo,
+    hasLineSync,
     hasWordSync,
     wordSyncEnabled
 } from './state.js';
@@ -40,7 +41,7 @@ export function isLatencyBeingAdjusted() {
 // ========== CORE FUNCTIONS ==========
 
 /**
- * Adjust the per-song word-sync offset
+ * Adjust the per-song timed-lyrics offset
  * @param {number} delta - Change in seconds (positive = later, negative = earlier)
  */
 export function adjustLatency(delta) {
@@ -278,8 +279,9 @@ export function setupLatencyKeyboardShortcuts() {
 }
 
 /**
- * Update visibility of main UI latency controls based on word-sync state
- * Should be called whenever hasWordSync or wordSyncEnabled changes
+ * Update visibility of main UI latency controls based on timed-lyrics state.
+ * Line-sync can use the controls directly; word-sync uses them when enabled.
+ * Should be called whenever line-sync or word-sync availability changes.
  */
 export function updateMainLatencyVisibility() {
     const mainControls = document.getElementById('main-latency-controls');
@@ -288,8 +290,11 @@ export function updateMainLatencyVisibility() {
     // Check user preference from localStorage
     const userHiddenPref = localStorage.getItem('latencyUIVisible') === 'false';
     
-    // Show only when: word-sync active AND user hasn't hidden it
-    const shouldShow = hasWordSync && wordSyncEnabled && !userHiddenPref;
+    // Show whenever timed lyrics are active and the user has not hidden them.
+    // Line-sync is active when available and word-sync is not taking over.
+    const lineSyncActive = hasLineSync && !(hasWordSync && wordSyncEnabled);
+    const wordSyncActive = hasWordSync && wordSyncEnabled;
+    const shouldShow = (lineSyncActive || wordSyncActive) && !userHiddenPref;
     
     if (shouldShow) {
         mainControls.classList.remove('hidden');

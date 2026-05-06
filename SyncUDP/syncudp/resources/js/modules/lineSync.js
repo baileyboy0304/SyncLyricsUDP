@@ -25,6 +25,7 @@ import {
     wordSyncAnchorTimestamp,
     wordSyncIsPlaying,
     wordSyncLatencyCompensation,
+    songWordSyncOffset,
     wordSyncTransitionMs,
     pixelScrollSpeed
 } from './state.js';
@@ -105,8 +106,8 @@ function escapeHtml(text) {
 
 /**
  * Update the flywheel clock for line-sync.
- * Same algorithm as wordSync.js but uses only base latency compensation
- * (no word-sync specific offsets).
+ * Same algorithm as wordSync.js but uses line-sync latency plus the
+ * per-song timed-lyrics offset adjusted from the UI.
  *
  * @param {number} timestamp - rAF timestamp
  * @returns {number} Current visual position in seconds
@@ -119,9 +120,9 @@ function updateFlywheelClock(timestamp) {
         return visualPosition;
     }
 
-    // Server position: anchor + elapsed + source-based latency only
+    // Server position: anchor + elapsed + source-based latency + per-song UI offset.
     const elapsed = (performance.now() - wordSyncAnchorTimestamp) / 1000;
-    const serverPosition = wordSyncAnchorPosition + elapsed + wordSyncLatencyCompensation;
+    const serverPosition = wordSyncAnchorPosition + elapsed + wordSyncLatencyCompensation + songWordSyncOffset;
 
     const rawDrift = serverPosition - visualPosition;
 
