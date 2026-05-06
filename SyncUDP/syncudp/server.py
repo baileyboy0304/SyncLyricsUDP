@@ -611,7 +611,12 @@ async def current_track() -> dict:
         scoped["provider_word_sync_offset"] = 0.0
         scoped["word_sync_provider"] = None
         scoped["word_sync_default_enabled"] = settings.get("features.word_sync_default_enabled", True)
-        scoped["song_word_sync_offset"] = 0.0
+        scoped_artist = scoped.get("artist")
+        scoped_title = scoped.get("title")
+        scoped["song_word_sync_offset"] = (
+            lyrics_module.get_song_word_sync_offset(scoped_artist, scoped_title)
+            if scoped_artist and scoped_title else 0.0
+        )
         scoped["is_instrumental"] = False
         scoped["is_instrumental_manual"] = False
         return scoped

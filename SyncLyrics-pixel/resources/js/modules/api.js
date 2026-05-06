@@ -417,9 +417,20 @@ export async function getLyrics(updateBackgroundFn, updateThemeColorFn, updatePr
         // Used for accurate gap detection during word-sync playback
         setInstrumentalMarkers(data.instrumental_markers);
 
-        // Update line-synced lyrics timing data (for smooth line-sync animation)
-        if (data.line_synced_lyrics && data.line_synced_lyrics.length > 1) {
-            setLineSyncedLyrics(data.line_synced_lyrics);
+        // Update line-synced lyrics timing data (for smooth line-sync animation).
+        // Prefer the explicit API field, but fall back to timestamped lyrics arrays
+        // so line-mode timing controls still appear if older responses omit it.
+        const timestampedLyrics = Array.isArray(data.lyrics)
+            ? data.lyrics
+                .filter(line => Array.isArray(line) && line.length >= 2 && Number.isFinite(Number(line[0])))
+                .map(line => ({ start: Number(line[0]), text: line[1] }))
+            : [];
+        const nextLineSyncedLyrics = (data.line_synced_lyrics && data.line_synced_lyrics.length > 1)
+            ? data.line_synced_lyrics
+            : timestampedLyrics;
+
+        if (nextLineSyncedLyrics && nextLineSyncedLyrics.length > 1) {
+            setLineSyncedLyrics(nextLineSyncedLyrics);
             setHasLineSync(true);
         } else {
             setLineSyncedLyrics(null);

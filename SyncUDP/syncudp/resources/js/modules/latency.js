@@ -26,6 +26,7 @@ const SAVE_DEBOUNCE_MS = 800;  // Debounce delay for saving
 const TOAST_DEBOUNCE_MS = 150; // Debounce delay for toast (show final value)
 const MANUAL_OVERRIDE_WINDOW_MS = 1000; // Ignore server offset for 1s after manual adjustment
 const STEP_SIZE = 0.05;        // 50ms adjustment per click
+const LATENCY_UI_VISIBLE_KEY = 'timedLyricsLatencyUIVisible';
 
 // ========== GUARD FUNCTION ==========
 
@@ -287,8 +288,9 @@ export function updateMainLatencyVisibility() {
     const mainControls = document.getElementById('main-latency-controls');
     if (!mainControls) return;
     
-    // Check user preference from localStorage
-    const userHiddenPref = localStorage.getItem('latencyUIVisible') === 'false';
+    // Check user preference from localStorage. Use the timed-lyrics key so
+    // older word-sync-only hide preferences do not suppress line-sync controls.
+    const userHiddenPref = isLatencyUIHidden();
     
     // Show whenever timed lyrics are active and the user has not hidden them.
     // Line-sync is active when available and word-sync is not taking over.
@@ -350,9 +352,6 @@ export function initLatencyPositioning() {
 }
 
 // ========== LATENCY UI VISIBILITY TOGGLE ==========
-
-// localStorage key for UI visibility preference
-const LATENCY_UI_VISIBLE_KEY = 'latencyUIVisible';
 
 /**
  * Check if user has hidden the main UI latency controls

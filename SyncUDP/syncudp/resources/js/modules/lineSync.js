@@ -546,7 +546,7 @@ export function startLineSyncAnimation() {
 
     // Initialise flywheel clock from current anchor
     const elapsed = (performance.now() - wordSyncAnchorTimestamp) / 1000;
-    visualPosition = wordSyncAnchorPosition + elapsed + wordSyncLatencyCompensation;
+    visualPosition = wordSyncAnchorPosition + elapsed + wordSyncLatencyCompensation + songWordSyncOffset;
     renderPosition = visualPosition;
     visualSpeed = 1.0;
     lastFrameTime = 0;
