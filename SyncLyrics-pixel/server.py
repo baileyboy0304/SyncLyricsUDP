@@ -453,12 +453,32 @@ def _player_name_from_request() -> Optional[str]:
 def _get_music_assistant_player_id_for_player(player_name: Optional[str]) -> Optional[str]:
     """Return the linked Music Assistant player id for a SyncLyrics player."""
     if not player_name:
+        logger.debug("MA scoped controls: no ?player= supplied, skipping linked-player lookup")
         return None
     try:
         from audio_recognition.player_registry import get_registry
-        for player in get_registry().list_players():
+        players = get_registry().list_players()
+        known_players = [
+            {
+                "name": player.name,
+                "display_name": player.display_name,
+                "music_assistant_player_id": player.music_assistant_player_id,
+            }
+            for player in players
+        ]
+        for player in players:
             if player.name == player_name:
+                logger.debug(
+                    "MA scoped controls: player=%r resolved to ma_player_id=%r",
+                    player_name,
+                    player.music_assistant_player_id,
+                )
                 return player.music_assistant_player_id
+        logger.debug(
+            "MA scoped controls: player=%r not found in registry; known_players=%s",
+            player_name,
+            known_players,
+        )
     except Exception as exc:
         logger.debug(f"Could not resolve MA player link for {player_name}: {exc}")
     return None
@@ -476,21 +496,38 @@ async def _run_music_assistant_player_command(
     their linked Music Assistant transport controls.
     """
     if not player_id:
+        logger.debug("MA scoped controls: command=%s has no linked MA player id; falling back", command)
         return None
 
+    logger.debug(
+        "MA scoped controls: attempting command=%s ma_player_id=%r position_ms=%r",
+        command,
+        player_id,
+        position_ms,
+    )
     try:
         from system_utils.sources.music_assistant import MusicAssistantSource
         ma_source = MusicAssistantSource()
         if command == "play-pause":
-            return await ma_source.toggle_playback(player_id=player_id)
-        if command == "next":
-            return await ma_source.next_track(player_id=player_id)
-        if command == "previous":
-            return await ma_source.previous_track(player_id=player_id)
-        if command == "seek":
+            success = await ma_source.toggle_playback(player_id=player_id)
+        elif command == "next":
+            success = await ma_source.next_track(player_id=player_id)
+        elif command == "previous":
+            success = await ma_source.previous_track(player_id=player_id)
+        elif command == "seek":
             if position_ms is None:
-                return False
-            return await ma_source.seek(position_ms, player_id=player_id)
+                success = False
+            else:
+                success = await ma_source.seek(position_ms, player_id=player_id)
+        else:
+            success = False
+        logger.debug(
+            "MA scoped controls: command=%s ma_player_id=%r success=%s",
+            command,
+            player_id,
+            success,
+        )
+        return success
     except Exception as exc:
         logger.debug(f"Music Assistant scoped {command} failed for {player_id}: {exc}")
         return False
@@ -515,6 +552,14 @@ def _build_player_track_payload(player_name: str) -> Optional[dict]:
     artist = song.get("artist", "")
     title = song.get("title", "")
     linked_ma_player_id = _get_music_assistant_player_id_for_player(player_name)
+    logger.debug(
+        "MA scoped controls: /current-track player=%r title=%r artist=%r linked_ma_player_id=%r can_control=%s",
+        player_name,
+        title,
+        artist,
+        linked_ma_player_id,
+        bool(linked_ma_player_id),
+    )
     metadata = {
         "source": "audio_recognition",
         "player": player_name,
@@ -2221,7 +2266,13 @@ async def toggle_playback():
     app_id = metadata.get('app_id', 'N/A') if metadata else 'N/A'
     logger.debug(f"Playback toggle - source: {source}, app_id: {app_id}")
 
-    scoped_ma_player_id = _get_music_assistant_player_id_for_player(_player_name_from_request())
+    scoped_player_name = _player_name_from_request()
+    scoped_ma_player_id = _get_music_assistant_player_id_for_player(scoped_player_name)
+    logger.debug(
+        "Playback toggle scoped routing - requested_player=%r linked_ma_player_id=%r",
+        scoped_player_name,
+        scoped_ma_player_id,
+    )
     scoped_success = await _run_music_assistant_player_command("play-pause", scoped_ma_player_id)
     if scoped_success is not None:
         if scoped_success:
@@ -2312,7 +2363,13 @@ async def next_track():
     
     logger.debug(f"Playback next - source: {source}")
 
-    scoped_ma_player_id = _get_music_assistant_player_id_for_player(_player_name_from_request())
+    scoped_player_name = _player_name_from_request()
+    scoped_ma_player_id = _get_music_assistant_player_id_for_player(scoped_player_name)
+    logger.debug(
+        "Playback next scoped routing - requested_player=%r linked_ma_player_id=%r",
+        scoped_player_name,
+        scoped_ma_player_id,
+    )
     scoped_success = await _run_music_assistant_player_command("next", scoped_ma_player_id)
     if scoped_success is not None:
         if scoped_success:
@@ -2372,7 +2429,13 @@ async def previous_track():
     
     logger.debug(f"Playback previous - source: {source}")
 
-    scoped_ma_player_id = _get_music_assistant_player_id_for_player(_player_name_from_request())
+    scoped_player_name = _player_name_from_request()
+    scoped_ma_player_id = _get_music_assistant_player_id_for_player(scoped_player_name)
+    logger.debug(
+        "Playback previous scoped routing - requested_player=%r linked_ma_player_id=%r",
+        scoped_player_name,
+        scoped_ma_player_id,
+    )
     scoped_success = await _run_music_assistant_player_command("previous", scoped_ma_player_id)
     if scoped_success is not None:
         if scoped_success:
@@ -2445,7 +2508,14 @@ async def seek_playback():
     # Debug logging for routing decisions
     logger.debug(f"Seek to {position_ms}ms - source: {source}")
 
-    scoped_ma_player_id = _get_music_assistant_player_id_for_player(_player_name_from_request())
+    scoped_player_name = _player_name_from_request()
+    scoped_ma_player_id = _get_music_assistant_player_id_for_player(scoped_player_name)
+    logger.debug(
+        "Playback seek scoped routing - requested_player=%r linked_ma_player_id=%r position_ms=%r",
+        scoped_player_name,
+        scoped_ma_player_id,
+        position_ms,
+    )
     scoped_success = await _run_music_assistant_player_command("seek", scoped_ma_player_id, position_ms=position_ms)
     if scoped_success is not None:
         if scoped_success:

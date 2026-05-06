@@ -297,6 +297,16 @@ export function updateControlState(trackInfo) {
         trackInfo.source === 'music_assistant' ||
         trackInfo.source === 'linux';
 
+    console.debug('[Controls] updateControlState', {
+        player: trackInfo.player,
+        source: trackInfo.source,
+        controlsSource: trackInfo.controls_source,
+        canControlFlag: trackInfo.can_control,
+        canControl,
+        title: trackInfo.title,
+        artist: trackInfo.artist,
+    });
+
     if (prevBtn) prevBtn.disabled = !canControl;
     if (nextBtn) nextBtn.disabled = !canControl;
     if (playPauseBtn) {
