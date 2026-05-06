@@ -781,3 +781,11 @@
 .status-value.no-match {
     color: #f39c12;
 }
+.udp-only-note {
+    margin: 12px 0;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.85);
+    line-height: 1.4;
+}

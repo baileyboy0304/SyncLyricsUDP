@@ -49,7 +49,7 @@ _instrumental_markers_cache = {
 
 # Legacy playback sources - these use existing Windows/Spotify routing.
 # Plugin sources not in this set get routed to their own playback handlers.
-LEGACY_PLAYBACK_SOURCES = {'windows_media', 'spotify', 'spotify_hybrid', 'spicetify', 'audio_recognition'}
+LEGACY_PLAYBACK_SOURCES = {'audio_recognition'}
 
 TEMPLATE_DIRECTORY = str(RESOURCES_DIR / "templates")
 STATIC_DIRECTORY = str(RESOURCES_DIR)
@@ -170,54 +170,19 @@ async def health():
     }, 200
 
 @app.route("/")
-async def index() -> str:
-    """Main page - pass Spotify auth URL if not authenticated"""
-    from config import SPOTIFY
-    
-    # Check if Spotify needs authentication
-    spotify_auth_url = None
-    spotify_needs_auth = False
-    configured_redirect_uri = None
-    suggested_redirect_uri = None
-    
-    # Use the shared singleton client (ensures all stats consolidated)
-    client = get_shared_spotify_client()
-    
-    # If we have a client that isn't initialized, get auth URL so user can log in
-    if client and not client.initialized:
-        # Get the auth URL for Spotify login
-        try:
-            spotify_auth_url = client.get_auth_url()
-            spotify_needs_auth = True
-            
-            # Get configured redirect URI from ENV (if any)
-            configured_redirect_uri = SPOTIFY.get("redirect_uri")
-            
-            # Generate suggested redirect URI based on auto-detected local IP
-            # This helps users configure Spotify Developer Dashboard correctly
-            import socket
-            try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                s.settimeout(0)
-                s.connect(('8.8.8.8', 1))
-                local_ip = s.getsockname()[0]
-                s.close()
-            except Exception:
-                local_ip = "localhost"
-            
-            https_port = SERVER.get("https_port", 9013)
-            suggested_redirect_uri = f"https://{local_ip}:{https_port}/callback"
-            
-        except Exception as e:
-            logger.error(f"Failed to get Spotify auth URL: {e}")
-            spotify_auth_url = None
-    
-    # Render the HTML template with Spotify auth info
-    return await render_template('index.html', 
-                                spotify_auth_url=spotify_auth_url,
-                                spotify_needs_auth=spotify_needs_auth,
-                                configured_redirect_uri=configured_redirect_uri,
-                                suggested_redirect_uri=suggested_redirect_uri)
+async def index():
+    """Render main UDP-only web UI."""
+    try:
+        return await render_template(
+            "index.html",
+            spotify_auth_url=None,
+            spotify_needs_auth=False,
+            configured_redirect_uri=None,
+            suggested_redirect_uri=None,
+        )
+    except Exception as e:
+        logger.error(f"Error rendering index: {e}", exc_info=True)
+        return f"Error rendering template: {str(e)}", 500
 
 
 @app.route("/lyrics")
@@ -686,9 +651,6 @@ async def current_track() -> dict:
             if source == "spotify":
                 # Spotify-only mode (e.g., HAOS without Windows)
                 latency_comp = LYRICS.get("display", {}).get("spotify_latency_compensation", -0.5)
-            elif source == "spicetify":
-                # Spicetify mode (Spotify Desktop via WebSocket)
-                latency_comp = LYRICS.get("display", {}).get("spicetify_latency_compensation", 0.0)
             elif source == "audio_recognition":
                 # Audio recognition mode
                 latency_comp = LYRICS.get("display", {}).get("audio_recognition_latency_compensation", 0.0)
@@ -696,7 +658,6 @@ async def current_track() -> dict:
                 # Music Assistant mode (network streaming via MA server)
                 latency_comp = LYRICS.get("display", {}).get("music_assistant_latency_compensation", 0.0)
             else:
-                # Normal mode (Windows Media, hybrid)
                 latency_comp = LYRICS.get("display", {}).get("latency_compensation", 0.0)
             metadata["latency_compensation"] = latency_comp
             
@@ -785,9 +746,8 @@ async def get_audio_analysis():
     Get audio analysis for current track (waveform + spectrum data).
     Used by frontend for waveform seekbar and spectrum visualizer.
     
-    Data sources (in priority order):
-    1. Live Spicetify state (when Spicetify is active)
-    2. Cached database (for previously-played songs from any source)
+    Data sources:
+    1. Cached audio-analysis database (if available)
     
     Returns:
         - waveform: List of {start, amp} where amp is normalized 0-1
@@ -798,7 +758,6 @@ async def get_audio_analysis():
         - analysis_track_id: Normalized track ID for frontend validation
     """
     import asyncio
-    from system_utils.spicetify import _spicetify_state, is_connected as is_spicetify_fresh
     from system_utils.spicetify_db import load_from_db
     from system_utils.helpers import _normalize_track_id
     
@@ -810,24 +769,8 @@ async def get_audio_analysis():
     metadata = await get_current_song_meta_data()
     active_source = metadata.get('source') if metadata else None
     
-    # 1. Try live Spicetify state ONLY if Spicetify is the ACTIVE source
-    # This prevents a paused Spicetify from providing wrong analysis when
-    # another source (e.g., Music Assistant) is playing a different track
-    if active_source == 'spicetify' and is_spicetify_fresh():
-        live_analysis = _spicetify_state.get('audio_analysis')
-        # Check if it has actual segment data (not just empty arrays)
-        if live_analysis and live_analysis.get('segments'):
-            analysis = live_analysis
-            # Use the track ID from Spicetify state
-            analysis_track_id = _spicetify_state.get('audio_analysis_track_id')
-            # Get track info for logging
-            track_info = _spicetify_state.get('track', {})
-            artist = track_info.get('artist', 'Unknown')
-            title = track_info.get('name', 'Unknown')
-            logger.debug(f"Using live Spicetify audio analysis: {artist} - {title}")
-    
-    # 2. Fall back to database cache (works for ANY source)
-    # This finds cached analysis by artist/title, regardless of which source cached it
+    # Fall back to database cache (works for ANY source)
+    # This finds cached analysis by artist/title.
     if not analysis and metadata:
         artist = metadata.get('artist', '')
         title = metadata.get('title', '')
@@ -839,7 +782,7 @@ async def get_audio_analysis():
                 # Compute track ID from the metadata we used to load
                 # This ensures frontend validation works correctly
                 analysis_track_id = _normalize_track_id(artist, title)
-                logger.info(f"Loaded audio analysis from Spicetify cache: {artist} - {title} (source: {active_source})")
+                logger.info(f"Loaded audio analysis from cache: {artist} - {title} (source: {active_source})")
             else:
                 logger.debug(f"No cached audio analysis for: {artist} - {title}")
     
@@ -2160,513 +2103,94 @@ async def get_cover_art():
     
     return "", 404
 
+async def _music_assistant_source_for_controls():
+    metadata = await get_current_song_meta_data()
+    if not metadata or metadata.get('source') != 'music_assistant':
+        return None
+    from system_utils.sources.music_assistant import MusicAssistantSource
+    return MusicAssistantSource()
+
+
 @app.route("/api/playback/play-pause", methods=['POST'])
 async def toggle_playback():
-    """Toggle play/pause - routes to Windows or Spotify based on current source."""
-    # Get current source to determine which control method to use
-    metadata = await get_current_song_meta_data()
-    source = metadata.get('source') if metadata else None
-    
-    # Debug logging for routing decisions
-    app_id = metadata.get('app_id', 'N/A') if metadata else 'N/A'
-    logger.debug(f"Playback toggle - source: {source}, app_id: {app_id}")
-    
-    # Windows source uses Windows playback controls
-    if source == 'windows_media':
-        from system_utils.windows import windows_toggle_playback
-        success = await windows_toggle_playback()
-        if success:
-            return jsonify({"status": "success", "message": "Toggled (Windows)"})
-        else:
-            return jsonify({"error": "Windows playback control failed"}), 500
-    
-    # HYBRID MODE + SPICETIFY: Windows SMTC first (fast, no rate limits), Spotify API fallback
-    # Spicetify is Spotify Desktop, which registers with Windows SMTC
-    if source in ['spotify_hybrid', 'spicetify']:
-        from system_utils.windows import windows_toggle_playback
-        success = await windows_toggle_playback()
-        if success:
-            return jsonify({"status": "success", "message": "Toggled (Windows)"})
-        
-        # Windows failed - fall back to Spotify API (covers Spotify Connect, SMTC glitches)
-        logger.debug("Windows toggle failed for hybrid, falling back to Spotify API")
-        # Fall through to Spotify logic below
-    
-    # FALLBACK: When source is None (session expired after paused_timeout, e.g. 10+ mins idle),
-    # try Windows SMTC anyway before falling through to Spotify API.
-    # This handles the case where the app (e.g., Spotify Desktop) is still paused and can be resumed.
-    if source is None:
-        from system_utils.windows import windows_toggle_playback
-        success = await windows_toggle_playback()
-        if success:
-            return jsonify({"status": "success", "message": "Toggled (Windows - Expired Session Fallback)"})
-        logger.debug("Windows toggle fallback failed (no session), trying Spotify API")
-    
-    # === PLUGIN SOURCE ROUTING ===
-    # Check if source is a plugin with playback capability
-    if source and source not in LEGACY_PLAYBACK_SOURCES:
-        try:
-            from system_utils.sources import get_source
-            from system_utils.sources.base import SourceCapability
-            
-            plugin = get_source(source)
-            if plugin and plugin.capabilities() & SourceCapability.PLAYBACK_CONTROL:
-                success = await plugin.toggle_playback()
-                if success:
-                    return jsonify({"status": "success", "message": f"Toggled ({source})"})
-                logger.debug(f"Plugin {source} toggle failed, falling back to Spotify API")
-        except Exception as e:
-            logger.debug(f"Plugin playback routing failed: {e}")
-    
-    # Spotify source (and hybrid/plugin fallback) uses Spotify API
-    client = get_spotify_client()
-    if not client: return jsonify({"error": "Spotify not connected"}), 503
-    
-    # We need to know if playing or paused to toggle
-    track = await client.get_current_track()
-    # if not track: return jsonify({"error": "No active session"}), 404
-    
-    # Logic Update (Dec 1, 2025):
-    # If track is None (inactive session), we should try to RESUME instead of erroring.
-    # Spotify clears the active session after a few minutes of pause.
-    is_playing = track.get('is_playing') if track else False
-    
-    if is_playing:
-        await client.pause_playback()
-        msg = "Paused"
-    else:
-        # Try to resume. This works for both "Paused" state and "Inactive/No Session" state.
-        success = await client.resume_playback()
-        if success:
-            msg = "Resumed"
-        else:
-            # If resume failed and we really had no track info, then we can't do anything
-            if not track:
-                return jsonify({"error": "No active session"}), 404
-            msg = "Resume command sent (but might have failed)"
-    
-    return jsonify({"status": "success", "message": msg})
+    ma_source = await _music_assistant_source_for_controls()
+    if not ma_source:
+        return jsonify({"error": "Playback control is not available for fixed UDP input"}), 410
+    success = await ma_source.toggle_playback()
+    return jsonify({"status": "success", "message": "Toggled (music_assistant)"}) if success else (jsonify({"error": "Music Assistant playback control failed"}), 500)
+
 
 @app.route("/api/playback/next", methods=['POST'])
 async def next_track():
-    """Skip to next track - routes to Windows or Spotify based on current source."""
-    metadata = await get_current_song_meta_data()
-    source = metadata.get('source') if metadata else None
-    
-    logger.debug(f"Playback next - source: {source}")
-    
-    if source == 'windows_media':
-        from system_utils.windows import windows_next
-        success = await windows_next()
-        if success:
-            return jsonify({"status": "success", "message": "Skipped (Windows)"})
-        else:
-            return jsonify({"error": "Windows playback control failed"}), 500
-    
-    # HYBRID MODE + SPICETIFY: Windows SMTC first, Spotify API fallback
-    if source in ['spotify_hybrid', 'spicetify']:
-        from system_utils.windows import windows_next
-        success = await windows_next()
-        if success:
-            return jsonify({"status": "success", "message": "Skipped (Windows)"})
-        logger.debug("Windows next failed for hybrid, falling back to Spotify API")
-    
-    # FALLBACK: When source is None (session expired), try Windows SMTC anyway
-    if source is None:
-        from system_utils.windows import windows_next
-        success = await windows_next()
-        if success:
-            return jsonify({"status": "success", "message": "Skipped (Windows - Expired Session Fallback)"})
-        logger.debug("Windows next fallback failed (no session), trying Spotify API")
-    
-    # === PLUGIN SOURCE ROUTING ===
-    if source and source not in LEGACY_PLAYBACK_SOURCES:
-        try:
-            from system_utils.sources import get_source
-            from system_utils.sources.base import SourceCapability
-            
-            plugin = get_source(source)
-            if plugin and plugin.capabilities() & SourceCapability.PLAYBACK_CONTROL:
-                success = await plugin.next_track()
-                if success:
-                    return jsonify({"status": "success", "message": f"Skipped ({source})"})
-                logger.debug(f"Plugin {source} next failed, falling back to Spotify API")
-        except Exception as e:
-            logger.debug(f"Plugin playback routing failed: {e}")
-    
-    client = get_spotify_client()
-    if not client: return jsonify({"error": "Spotify not connected"}), 503
-    
-    await client.next_track()
-    return jsonify({"status": "success", "message": "Skipped"})
+    ma_source = await _music_assistant_source_for_controls()
+    if not ma_source:
+        return jsonify({"error": "Playback control is not available for fixed UDP input"}), 410
+    success = await ma_source.next_track()
+    return jsonify({"status": "success", "message": "Next (music_assistant)"}) if success else (jsonify({"error": "Music Assistant next failed"}), 500)
+
 
 @app.route("/api/playback/previous", methods=['POST'])
 async def previous_track():
-    """Skip to previous track - routes to Windows or Spotify based on current source."""
-    metadata = await get_current_song_meta_data()
-    source = metadata.get('source') if metadata else None
-    
-    logger.debug(f"Playback previous - source: {source}")
-    
-    if source == 'windows_media':
-        from system_utils.windows import windows_previous
-        success = await windows_previous()
-        if success:
-            return jsonify({"status": "success", "message": "Previous (Windows)"})
-        else:
-            return jsonify({"error": "Windows playback control failed"}), 500
-    
-    # HYBRID MODE + SPICETIFY: Windows SMTC first, Spotify API fallback
-    if source in ['spotify_hybrid', 'spicetify']:
-        from system_utils.windows import windows_previous
-        success = await windows_previous()
-        if success:
-            return jsonify({"status": "success", "message": "Previous (Windows)"})
-        logger.debug("Windows previous failed for hybrid, falling back to Spotify API")
-    
-    # FALLBACK: When source is None (session expired), try Windows SMTC anyway
-    if source is None:
-        from system_utils.windows import windows_previous
-        success = await windows_previous()
-        if success:
-            return jsonify({"status": "success", "message": "Previous (Windows - Expired Session Fallback)"})
-        logger.debug("Windows previous fallback failed (no session), trying Spotify API")
-    
-    # === PLUGIN SOURCE ROUTING ===
-    if source and source not in LEGACY_PLAYBACK_SOURCES:
-        try:
-            from system_utils.sources import get_source
-            from system_utils.sources.base import SourceCapability
-            
-            plugin = get_source(source)
-            if plugin and plugin.capabilities() & SourceCapability.PLAYBACK_CONTROL:
-                success = await plugin.previous_track()
-                if success:
-                    return jsonify({"status": "success", "message": f"Previous ({source})"})
-                logger.debug(f"Plugin {source} previous failed, falling back to Spotify API")
-        except Exception as e:
-            logger.debug(f"Plugin playback routing failed: {e}")
-    
-    client = get_spotify_client()
-    if not client: return jsonify({"error": "Spotify not connected"}), 503
-    
-    await client.previous_track()
-    return jsonify({"status": "success", "message": "Previous"})
+    ma_source = await _music_assistant_source_for_controls()
+    if not ma_source:
+        return jsonify({"error": "Playback control is not available for fixed UDP input"}), 410
+    success = await ma_source.previous_track()
+    return jsonify({"status": "success", "message": "Previous (music_assistant)"}) if success else (jsonify({"error": "Music Assistant previous failed"}), 500)
+
 
 @app.route("/api/playback/seek", methods=['POST'])
 async def seek_playback():
-    """Seek to position - routes to Windows or Spotify based on current source."""
-    data = await request.get_json()
+    data = await request.get_json() or {}
     position_ms = data.get('position_ms')
-    
     if position_ms is None:
         return jsonify({"error": "position_ms required"}), 400
-    
-    # Ensure position_ms is an integer
-    try:
-        position_ms = int(position_ms)
-    except (ValueError, TypeError):
-        return jsonify({"error": "position_ms must be a number"}), 400
-    
-    metadata = await get_current_song_meta_data()
-    source = metadata.get('source') if metadata else None
-    
-    # Debug logging for routing decisions
-    logger.debug(f"Seek to {position_ms}ms - source: {source}")
-    
-    # Windows source uses Windows playback controls
-    if source == 'windows_media':
-        from system_utils.windows import windows_seek
-        success = await windows_seek(position_ms)
-        if success:
-            return jsonify({"status": "success", "message": f"Seeked to {position_ms}ms (Windows)"})
-        else:
-            return jsonify({"error": "Windows seek failed"}), 500
-    
-    # HYBRID MODE + SPICETIFY: Windows SMTC first (fast, no rate limits), Spotify API fallback
-    if source in ['spotify_hybrid', 'spicetify']:
-        from system_utils.windows import windows_seek
-        success = await windows_seek(position_ms)
-        if success:
-            return jsonify({"status": "success", "message": f"Seeked to {position_ms}ms (Windows)"})
-        
-        # Windows failed - fall back to Spotify API
-        logger.debug("Windows seek failed for hybrid, falling back to Spotify API")
-        # Fall through to Spotify logic below
-    
-    # === PLUGIN SOURCE ROUTING ===
-    if source and source not in LEGACY_PLAYBACK_SOURCES:
-        try:
-            from system_utils.sources import get_source
-            from system_utils.sources.base import SourceCapability
-            
-            plugin = get_source(source)
-            if plugin and plugin.capabilities() & SourceCapability.SEEK:
-                success = await plugin.seek(position_ms)
-                if success:
-                    return jsonify({"status": "success", "message": f"Seeked to {position_ms}ms ({source})"})
-                logger.debug(f"Plugin {source} seek failed, falling back to Spotify API")
-        except Exception as e:
-            logger.debug(f"Plugin seek routing failed: {e}")
-    
-    # Spotify source (and hybrid/plugin fallback) uses Spotify API
-    client = get_spotify_client()
-    if not client:
-        return jsonify({"error": "Spotify not connected"}), 503
-    
-    success = await client.seek_to_position(position_ms)
-    if success:
-        return jsonify({"status": "success", "message": f"Seeked to {position_ms}ms (Spotify)"})
-    return jsonify({"error": "Seek failed"}), 500
-
-@app.route("/api/artist/images", methods=['GET'])
-async def get_artist_images():
-    """
-    Get artist images, preferring local DB, falling back to Spotify and caching.
-
-    Query params:
-        artist_id: Spotify artist ID (optional, used for fallback)
-        include_metadata: If 'true', return full image metadata and preferences
-        player: Optional multi-instance player name. When supplied the artist
-            is resolved against that player's engine rather than the first
-            registered one, so the slideshow matches the scoped frontend.
-    """
-    # Get query params
-    artist_id = request.args.get('artist_id')
-    include_metadata = request.args.get('include_metadata', 'false').lower() == 'true'
-    player_scope = _player_name_from_request()
-
-    # We also need the artist NAME to find the folder
-    # Try to get from current metadata if not passed
-    hint_token = None
-    if player_scope:
-        hint_token = system_state.metadata_player_hint.set(player_scope)
-    try:
-        metadata = await get_current_song_meta_data()
-    finally:
-        if hint_token is not None:
-            system_state.metadata_player_hint.reset(hint_token)
-    artist_name = metadata.get('artist') if metadata else None
-    
-    if not artist_name:
-         return jsonify({"error": "No artist name available"}), 400
-
-    # CRITICAL FIX: Prefer artist_id from metadata (current track) over query param (might be stale)
-    # This prevents race conditions where frontend sends old ID (from previous track)
-    # but backend has new Artist Name (from current track).
-    # If metadata doesn't have artist_id, fall back to query param (better than nothing)
-    if metadata and metadata.get('artist_id'):
-        artist_id = metadata.get('artist_id')
-    # Note: If metadata doesn't have artist_id, we use query param as fallback.
-    # This is safe because ensure_artist_image_db uses artist_name as primary identifier
-    # and artist_id is only used for Spotify fallback and race condition prevention.
-
-    # Log visual mode activity/fetching
-    # logger.info(f"Fetching artist images for Visual Mode: {artist_name} ({artist_id})")
-
-    # 1. Try to ensure/fetch from DB (this handles caching automatically)
-    from system_utils import ensure_artist_image_db
-    
-    # This will return local URLs like /api/album-art/image/Artist/img.jpg
-    images = await ensure_artist_image_db(artist_name, artist_id)
-    
-    # Build response
-    response = {
-        "artist_id": artist_id,
-        "artist_name": artist_name,
-        "images": images,
-        "count": len(images)
-    }
-    
-    # Extended behavior: include full metadata and preferences
-    if include_metadata:
-        from system_utils.artist_image import get_slideshow_preferences
-        from system_utils.album_art import get_album_db_folder
-        
-        folder = get_album_db_folder(artist_name, None)
-        metadata_path = folder / "metadata.json"
-        image_metadata = []
-        
-        if metadata_path.exists():
-            try:
-                with open(metadata_path, 'r', encoding='utf-8') as f:
-                    full_metadata = json.load(f)
-                # Only include downloaded images with relevant fields
-                for img in full_metadata.get("images", []):
-                    if img.get("downloaded") and img.get("filename"):
-                        image_metadata.append({
-                            "source": img.get("source", "unknown"),
-                            "filename": img.get("filename"),
-                            "width": img.get("width"),
-                            "height": img.get("height"),
-                            "added_at": img.get("added_at")
-                        })
-            except Exception as e:
-                logger.debug(f"Failed to load image metadata for '{artist_name}': {e}")
-        
-        response["metadata"] = image_metadata
-        response["preferences"] = get_slideshow_preferences(artist_name)
-    
-    return jsonify(response)
-
-
-@app.route("/api/artist/images/preferences", methods=['POST'])
-async def save_artist_slideshow_preferences_endpoint():
-    """
-    Save slideshow preferences for an artist.
-    
-    Body: {
-        "artist": "Artist Name",
-        "excluded": ["filename1.jpg", ...],
-        "auto_enable": true | false | null,
-        "favorites": ["filename2.jpg", ...]
-    }
-    """
-    from system_utils.artist_image import save_slideshow_preferences
-    
-    data = await request.get_json()
-    artist = data.get('artist')
-    
-    if not artist:
-        return jsonify({"error": "Artist name required"}), 400
-    
-    preferences = {
-        "excluded": data.get('excluded', []),
-        "auto_enable": data.get('auto_enable'),
-        "favorites": data.get('favorites', [])
-    }
-    
-    success = save_slideshow_preferences(artist, preferences)
-    
-    if success:
-        logger.info(f"Saved slideshow preferences for '{artist}'")
-        return jsonify({"status": "success", "message": "Preferences saved"})
-    else:
-        return jsonify({"error": "Failed to save preferences"}), 500
+    ma_source = await _music_assistant_source_for_controls()
+    if not ma_source:
+        return jsonify({"error": "Seeking is not available for fixed UDP input"}), 410
+    success = await ma_source.seek(position_ms)
+    return jsonify({"status": "success", "position_ms": position_ms}) if success else (jsonify({"error": "Music Assistant seek failed"}), 500)
 
 
 @app.route("/api/playback/queue", methods=['GET'])
 async def get_playback_queue():
-    """
-    Get playback queue.
-    
-    Uses Spicetify when active (more accurate - includes autoplay tracks),
-    falls back to Spotify Web API otherwise.
-    """
-    # Check if we should use Spicetify (more accurate queue with autoplay tracks)
-    metadata = await get_current_song_meta_data()
-    source = metadata.get('source') if metadata else None
-    
-    if source == 'spicetify':
-        # Try Spicetify first (includes autoplay tracks that Web API misses)
-        from system_utils.spicetify import get_queue as get_spicetify_queue, is_connected
-        
-        if is_connected():
-            spicetify_queue = await get_spicetify_queue()
-            if spicetify_queue and spicetify_queue.get('success'):
-                # Return in same format as Spotify API response
-                return jsonify({
-                    "current": spicetify_queue.get('current'),
-                    "queue": spicetify_queue.get('queue', [])[:20],  # Limit to 20 for consistency
-                    "source": "spicetify"  # Let frontend know this is more accurate data
-                })
-            else:
-                logger.debug("Spicetify queue request failed, falling back to Spotify API")
-    
-    # === PLUGIN SOURCE QUEUE ROUTING ===
-    # Check if source is a plugin with queue capability
-    if source and source not in LEGACY_PLAYBACK_SOURCES:
-        try:
-            from system_utils.sources import get_source, SourceCapability
-            plugin = get_source(source)
-            if plugin and plugin.capabilities() & SourceCapability.QUEUE:
-                queue_data = await plugin.get_queue()
-                if queue_data:
-                    return jsonify({
-                        "current": queue_data.get('current'),
-                        "queue": queue_data.get('queue', [])[:20],
-                        "source": source
-                    })
-                logger.debug(f"Plugin {source} queue failed, falling back to Spotify API")
-        except Exception as e:
-            logger.debug(f"Plugin queue routing failed: {e}")
-    
-
-    client = get_spotify_client()
-    if not client: 
-        return jsonify({"error": "Spotify not connected"}), 503
-    
-    queue_data = await client.get_queue()
-    if not queue_data:
-        return jsonify({"error": "Failed to fetch queue"}), 500
-        
-    # Simplify structure for frontend
-    currently_playing = queue_data.get('currently_playing')
-    queue = queue_data.get('queue', [])
-    
+    ma_source = await _music_assistant_source_for_controls()
+    if not ma_source:
+        return jsonify({"current": None, "queue": [], "source": "udp"})
+    queue_data = await ma_source.get_queue()
     return jsonify({
-        "current": currently_playing,
-        "queue": queue[:20],  # Limit to next 20 songs
-        "source": "spotify_api"  # Indicate this may not include autoplay
+        "current": (queue_data or {}).get('current'),
+        "queue": (queue_data or {}).get('queue', [])[:20],
+        "source": "music_assistant"
     })
+
 
 @app.route("/api/playback/liked", methods=['GET'])
 async def check_liked_status():
     track_id = request.args.get('track_id')
-    source = request.args.get('source', '')
-    
-    if not track_id: 
+    if not track_id:
         return jsonify({"error": "No track_id provided"}), 400
-    
-    # Route to Music Assistant if source indicates MA
-    if source == 'music_assistant':
-        from system_utils.sources.music_assistant import MusicAssistantSource
-        ma_source = MusicAssistantSource()
-        is_favorite = await ma_source.is_favorite(track_id)
-        return jsonify({"liked": is_favorite})
-    
-    # Default: Use Spotify
-    client = get_spotify_client()
-    if not client: 
-        return jsonify({"error": "Spotify not connected"}), 503
-    
-    is_liked = await client.is_track_liked(track_id)
-    return jsonify({"liked": is_liked})
+    ma_source = await _music_assistant_source_for_controls()
+    if not ma_source:
+        return jsonify({"liked": False, "source": "udp"})
+    return jsonify({"liked": await ma_source.is_favorite(track_id)})
+
 
 @app.route("/api/playback/liked", methods=['POST'])
 async def toggle_liked_status():
-    data = await request.get_json()
+    data = await request.get_json() or {}
     track_id = data.get('track_id')
-    action = data.get('action')  # 'like' or 'unlike'
-    source = data.get('source', '')
-    
-    if not track_id or not action: 
+    action = data.get('action')
+    if not track_id or not action:
         return jsonify({"error": "Missing parameters"}), 400
-    
-    # Route to Music Assistant if source indicates MA
-    if source == 'music_assistant':
-        from system_utils.sources.music_assistant import MusicAssistantSource
-        ma_source = MusicAssistantSource()
-        
-        success = False
-        if action == 'like':
-            success = await ma_source.add_to_favorites(track_id)
-        elif action == 'unlike':
-            success = await ma_source.remove_from_favorites(track_id)
-            
-        return jsonify({"success": success})
-    
-    # Default: Use Spotify
-    client = get_spotify_client()
-    if not client: 
-        return jsonify({"error": "Spotify not connected"}), 503
-    
-    success = False
+    ma_source = await _music_assistant_source_for_controls()
+    if not ma_source:
+        return jsonify({"error": "Favorites are only available through Music Assistant in the UDP-only add-on"}), 410
     if action == 'like':
-        success = await client.like_track(track_id)
+        success = await ma_source.add_to_favorites(track_id)
     elif action == 'unlike':
-        success = await client.unlike_track(track_id)
-        
+        success = await ma_source.remove_from_favorites(track_id)
+    else:
+        return jsonify({"error": "Invalid action"}), 400
     return jsonify({"success": success})
 
 
@@ -2676,36 +2200,14 @@ async def toggle_liked_status():
 
 @app.route("/api/spotify/devices", methods=['GET'])
 async def get_spotify_devices():
-    """Get list of available Spotify Connect devices."""
-    client = get_spotify_client()
-    if not client:
-        return jsonify({"error": "Spotify not connected"}), 503
-    
-    devices = await client.get_devices()
-    return jsonify({"devices": devices})
+    """Spotify Connect control is disabled in the UDP-only add-on."""
+    return jsonify({"error": "Spotify app control is disabled in SyncLyricsUDP", "devices": []}), 410
 
 
 @app.route("/api/spotify/transfer", methods=['POST'])
 async def transfer_spotify_playback():
-    """Transfer playback to a specific device.
-    
-    Body: {"device_id": "...", "force_play": true}
-    """
-    client = get_spotify_client()
-    if not client:
-        return jsonify({"error": "Spotify not connected"}), 503
-    
-    data = await request.get_json()
-    device_id = data.get('device_id')
-    force_play = data.get('force_play', True)
-    
-    if not device_id:
-        return jsonify({"error": "device_id required"}), 400
-    
-    success = await client.transfer_playback(device_id, force_play)
-    if success:
-        return jsonify({"status": "success", "message": f"Transferred to {device_id}"})
-    return jsonify({"error": "Transfer failed"}), 500
+    """Spotify Connect control is disabled in the UDP-only add-on."""
+    return jsonify({"error": "Spotify app control is disabled in SyncLyricsUDP"}), 410
 
 
 # --- Generic Playback Device Routes (Auto-detect source) ---
@@ -2735,13 +2237,7 @@ async def get_playback_devices():
         ma_source = MusicAssistantSource()
         devices = await ma_source.get_devices()
         return jsonify({"devices": devices, "source": "music_assistant"})
-    else:
-        # Default to Spotify
-        client = get_spotify_client()
-        if not client:
-            return jsonify({"error": "Spotify not connected", "devices": []}), 503
-        devices = await client.get_devices()
-        return jsonify({"devices": devices, "source": "spotify"})
+    return jsonify({"devices": [], "source": "udp", "message": "No playback device control for UDP input"})
 
 
 @app.route("/api/playback/transfer", methods=['POST'])
@@ -2749,7 +2245,7 @@ async def transfer_playback():
     """Transfer playback to a specific device.
     
     Body: {"device_id": "...", "force_play": true}
-    Auto-detects source and routes to MA or Spotify accordingly.
+    Routes to Music Assistant when available; UDP input itself has no device transfer.
     """
     data = await request.get_json()
     device_id = data.get('device_id')
@@ -2768,49 +2264,13 @@ async def transfer_playback():
         if success:
             return jsonify({"status": "success", "message": f"Transferred to {device_id}", "source": "music_assistant"})
         return jsonify({"error": "MA transfer failed"}), 500
-    else:
-        # Default to Spotify
-        client = get_spotify_client()
-        if not client:
-            return jsonify({"error": "Spotify not connected"}), 503
-        success = await client.transfer_playback(device_id, force_play)
-        if success:
-            return jsonify({"status": "success", "message": f"Transferred to {device_id}", "source": "spotify"})
-        return jsonify({"error": "Transfer failed"}), 500
+    return jsonify({"error": "Playback transfer is only available for Music Assistant in the UDP-only add-on"}), 410
 
 
 @app.route("/api/playback/volume", methods=['GET'])
 async def get_volume():
-    """Get volume levels for all available sources.
-    
-    Returns volume for Windows (if on Windows), Spotify, and Music Assistant.
-    Only returns sources that are available/configured.
-    """
-    import platform
-    
+    """Return Music Assistant volume only; local/Spotify volume controls are disabled."""
     volumes = {}
-    
-    # Windows system volume (Windows only)
-    if platform.system() == 'Windows':
-        try:
-            from system_utils.windows import get_windows_volume
-            volumes['windows'] = await get_windows_volume()
-        except Exception as e:
-            logger.debug(f"Could not get Windows volume: {e}")
-    
-    # Spotify volume (from current playback if available)
-    # Always try if Spotify client is configured - useful for all sources
-    client = get_spotify_client()
-    if client:
-        try:
-            # Get volume from current playback device
-            track = await client.get_current_track()
-            if track and 'device' in track:
-                volumes['spotify'] = track['device'].get('volume_percent')
-        except Exception as e:
-            logger.debug(f"Could not get Spotify volume: {e}")
-    
-    # Music Assistant volume (only if MA is the active source)
     try:
         metadata = await get_current_song_meta_data()
         source = metadata.get('source') if metadata else None
@@ -2820,7 +2280,6 @@ async def get_volume():
             volumes['music_assistant'] = await ma_source.get_volume()
     except Exception as e:
         logger.debug(f"Could not get MA volume: {e}")
-    
     return jsonify(volumes)
 
 
@@ -2828,13 +2287,13 @@ async def get_volume():
 async def set_volume():
     """Set volume for a specific source.
     
-    Body: {"source": "windows"|"spotify"|"music_assistant", "volume": 0-100}
+    Body: {"source": "music_assistant", "volume": 0-100}
     """
     data = await request.get_json()
     source = data.get('source')
     volume = data.get('volume')
     
-    if source not in ['windows', 'spotify', 'music_assistant']:
+    if source not in ['music_assistant']:
         return jsonify({"error": "Invalid source"}), 400
     
     if volume is None or not isinstance(volume, (int, float)):
@@ -2842,29 +2301,7 @@ async def set_volume():
     
     volume = int(max(0, min(100, volume)))
     
-    if source == 'windows':
-        import platform
-        if platform.system() != 'Windows':
-            return jsonify({"error": "Windows volume only available on Windows"}), 400
-        try:
-            from system_utils.windows import set_windows_volume
-            success = await set_windows_volume(volume)
-            if success:
-                return jsonify({"status": "success", "source": "windows", "volume": volume})
-            return jsonify({"error": "Failed to set Windows volume"}), 500
-        except ImportError:
-            return jsonify({"error": "Windows volume control not available"}), 500
-    
-    elif source == 'spotify':
-        client = get_spotify_client()
-        if not client:
-            return jsonify({"error": "Spotify not connected"}), 503
-        success = await client.set_volume(volume)
-        if success:
-            return jsonify({"status": "success", "source": "spotify", "volume": volume})
-        return jsonify({"error": "Failed to set Spotify volume"}), 500
-    
-    elif source == 'music_assistant':
+    if source == 'music_assistant':
         try:
             from system_utils.sources.music_assistant import MusicAssistantSource
             ma_source = MusicAssistantSource()
@@ -2878,135 +2315,46 @@ async def set_volume():
 
 @app.route("/api/playback/shuffle", methods=['POST'])
 async def set_shuffle():
-    """Set shuffle mode.
-    
-    Body: {"state": true|false} or empty body to toggle
-    Routes to Music Assistant or Spotify based on current playback source.
-    """
+    """Set Music Assistant shuffle when MA is the active metadata source."""
     data = await request.get_json() or {}
-    
-    # Check current source to determine which backend to use
-    metadata = await get_current_song_meta_data()
-    source = metadata.get('source') if metadata else None
-    
-    if source == 'music_assistant':
-        # Use Music Assistant
-        from system_utils.sources.music_assistant import MusicAssistantSource
-        ma_source = MusicAssistantSource()
-        
-        # If state not provided, toggle based on current state
-        if 'state' not in data:
-            current_shuffle = await ma_source.get_shuffle()
-            state = not current_shuffle if current_shuffle is not None else True
-        else:
-            state = bool(data.get('state'))
-        
-        success = await ma_source.set_shuffle(state)
-        if success:
-            return jsonify({"status": "success", "shuffle": state, "source": "music_assistant"})
-        return jsonify({"error": "Failed to set MA shuffle"}), 500
+    ma_source = await _music_assistant_source_for_controls()
+    if not ma_source:
+        return jsonify({"error": "Shuffle control is not available for fixed UDP input"}), 410
+    if 'state' not in data:
+        current_shuffle = await ma_source.get_shuffle()
+        state = not current_shuffle if current_shuffle is not None else True
     else:
-        # Use Spotify
-        client = get_spotify_client()
-        if not client:
-            return jsonify({"error": "Spotify not connected"}), 503
-        
-        # If state not provided, toggle based on current state
-        if 'state' not in data:
-            track = await client.get_current_track()
-            current_shuffle = track.get('shuffle_state', False) if track else False
-            state = not current_shuffle
-        else:
-            state = bool(data.get('state'))
-        
-        success = await client.set_shuffle(state)
-        if success:
-            # Update cache so next toggle uses correct current state
-            if client._metadata_cache:
-                client._metadata_cache['shuffle_state'] = state
-            return jsonify({"status": "success", "shuffle": state, "source": "spotify"})
-        return jsonify({"error": "Failed to set shuffle"}), 500
+        state = bool(data.get('state'))
+    success = await ma_source.set_shuffle(state)
+    return jsonify({"status": "success", "shuffle": state, "source": "music_assistant"}) if success else (jsonify({"error": "Failed to set MA shuffle"}), 500)
 
 
 @app.route("/api/playback/repeat", methods=['POST'])
 async def set_repeat():
-    """Set repeat mode.
-    
-    Body: {"mode": "off"|"context"|"track"} or empty body to cycle
-    Routes to Music Assistant or Spotify based on current playback source.
-    """
+    """Set Music Assistant repeat when MA is the active metadata source."""
     data = await request.get_json() or {}
-    
-    # Check current source to determine which backend to use
-    metadata = await get_current_song_meta_data()
-    source = metadata.get('source') if metadata else None
-    
-    if source == 'music_assistant':
-        # Use Music Assistant
-        from system_utils.sources.music_assistant import MusicAssistantSource
-        ma_source = MusicAssistantSource()
-        
-        # If mode not provided, cycle through: off -> context -> track -> off
-        if 'mode' not in data:
-            current_repeat = await ma_source.get_repeat() or 'off'
-            cycle = {'off': 'context', 'context': 'track', 'track': 'off'}
-            mode = cycle.get(current_repeat, 'off')
-        else:
-            mode = data.get('mode')
-            if mode not in ['off', 'context', 'track']:
-                return jsonify({"error": "Invalid mode. Use: off, context, track"}), 400
-        
-        success = await ma_source.set_repeat(mode)
-        if success:
-            return jsonify({"status": "success", "repeat": mode, "source": "music_assistant"})
-        return jsonify({"error": "Failed to set MA repeat"}), 500
+    ma_source = await _music_assistant_source_for_controls()
+    if not ma_source:
+        return jsonify({"error": "Repeat control is not available for fixed UDP input"}), 410
+    if 'mode' not in data:
+        current_repeat = await ma_source.get_repeat() or 'off'
+        cycle = {'off': 'context', 'context': 'track', 'track': 'off'}
+        mode = cycle.get(current_repeat, 'off')
     else:
-        # Use Spotify
-        client = get_spotify_client()
-        if not client:
-            return jsonify({"error": "Spotify not connected"}), 503
-        
-        # If mode not provided, cycle through: off -> context -> track -> off
-        if 'mode' not in data:
-            track = await client.get_current_track()
-            current_repeat = track.get('repeat_state', 'off') if track else 'off'
-            cycle = {'off': 'context', 'context': 'track', 'track': 'off'}
-            mode = cycle.get(current_repeat, 'off')
-        else:
-            mode = data.get('mode')
-            if mode not in ['off', 'context', 'track']:
-                return jsonify({"error": "Invalid mode. Use: off, context, track"}), 400
-        
-        success = await client.set_repeat(mode)
-        if success:
-            # Update cache so next cycle uses correct current state
-            if client._metadata_cache:
-                client._metadata_cache['repeat_state'] = mode
-            return jsonify({"status": "success", "repeat": mode, "source": "spotify"})
-        return jsonify({"error": "Failed to set repeat"}), 500
+        mode = data.get('mode')
+        if mode not in ['off', 'context', 'track']:
+            return jsonify({"error": "Invalid mode. Use: off, context, track"}), 400
+    success = await ma_source.set_repeat(mode)
+    return jsonify({"status": "success", "repeat": mode, "source": "music_assistant"}) if success else (jsonify({"error": "Failed to set MA repeat"}), 500)
 
 
 # ============================================================================
-# Audio Recognition API (Reaper Integration)
+# Audio Recognition API (UDP input)
 # ============================================================================
 
 @app.route('/api/audio-recognition/status', methods=['GET'])
 async def audio_recognition_status():
-    """
-    Get audio recognition status.
-    Returns current state, mode, song info, and device configuration.
-
-    CRITICAL FIX: Only import reaper/audio_recognition if:
-    1. The module was already imported (audio rec was used), OR
-    2. Audio recognition is explicitly enabled in config
-
-    This prevents PortAudio initialization from frontend polling when audio rec is disabled.
-    """
-    import sys
-
-    # Multi-instance UDP mode: PlayerManager owns the UDP port and drives
-    # recognition per player. Surface its aggregate state so the Audio Source
-    # modal reflects reality instead of the stale reaper-source idle stub.
+    """Get UDP recognition status without initializing any local capture source."""
     mgr = _get_player_manager_if_running()
     if mgr is not None:
         engines = mgr.list_engines()
@@ -3016,8 +2364,6 @@ async def audio_recognition_status():
                 live_engine = e
                 break
 
-        # Aggregate per-engine status so the Audio Source UI reflects real
-        # activity across all players (amp meter, search counter, etc.).
         max_audio_level = 0.0
         min_no_match = None
         engine_states = []
@@ -3027,8 +2373,7 @@ async def audio_recognition_status():
             except Exception:
                 continue
             lvl = st.get("audio_level") or 0.0
-            if lvl > max_audio_level:
-                max_audio_level = lvl
+            max_audio_level = max(max_audio_level, lvl)
             nm = st.get("consecutive_no_match")
             if nm is not None and (min_no_match is None or nm < min_no_match):
                 min_no_match = nm
@@ -3042,8 +2387,6 @@ async def audio_recognition_status():
             })
 
         current_song = None
-        mode_str = "idle"
-        state_str = "idle"
         if live_engine is not None:
             song = live_engine.get_current_song() or {}
             current_song = {
@@ -3053,18 +2396,13 @@ async def audio_recognition_status():
                 "album_art_url": song.get("album_art_url"),
                 "recognition_provider": song.get("recognition_provider", "shazam"),
             }
-            mode_str = "udp"
-            state_str = "listening"
-        elif engines:
-            mode_str = "udp"
-            state_str = "listening"
         return jsonify({
             "available": True,
             "enabled": True,
             "active": bool(engines),
             "running": bool(engines),
-            "mode": mode_str,
-            "state": state_str,
+            "mode": "udp",
+            "state": "listening" if engines else "idle",
             "udp_multi_instance": True,
             "player_count": len(engines),
             "reaper_detected": False,
@@ -3078,46 +2416,19 @@ async def audio_recognition_status():
             "engines": engine_states,
         })
 
-    # Check if reaper module was ever imported (meaning audio rec was actually used)
-    if 'system_utils.reaper' not in sys.modules:
-        # Module not imported - check if we should import it
-        from config import AUDIO_RECOGNITION
-        if not AUDIO_RECOGNITION.get("enabled", False):
-            # Not enabled in config - return stub status without importing
-            return jsonify({
-                "available": True,
-                "enabled": False,
-                "active": False,
-                "mode": "idle",
-                "reaper_detected": False,
-                "auto_detect": False,
-                "manual_mode": False,
-                "capture_mode": None,
-                "current_song": None
-            })
-    
-    # Either module was imported or audio rec is enabled - proceed normally
-    try:
-        from system_utils.reaper import get_reaper_source
-        
-        source = get_reaper_source()
-        status = source.get_status()
-        
-        # Fix 1.4: Removed device_available check - it's expensive (runs sd.query_devices)
-        # and was causing main loop blocking. Device availability should only be checked
-        # when the modal opens (in /api/audio-recognition/devices endpoint).
-        
-        return jsonify(status)
-        
-    except ImportError as e:
-        return jsonify({
-            "error": "Audio recognition not available",
-            "details": str(e),
-            "available": False
-        })
-    except Exception as e:
-        logger.error(f"Audio recognition status error: {e}")
-        return jsonify({"error": str(e)}), 500
+    return jsonify({
+        "available": True,
+        "enabled": False,
+        "active": False,
+        "running": False,
+        "mode": "udp",
+        "state": "idle",
+        "capture_mode": "udp",
+        "udp_mode": True,
+        "udp_only": True,
+        "current_song": None,
+        "message": "UDP listener is not running; check add-on recognition_enabled and UDP settings.",
+    })
 
 
 @app.route('/api/audio-recognition/start', methods=['POST'])
@@ -3138,28 +2449,11 @@ async def audio_recognition_start():
             "message": "Recognition is already running via UDP multi-instance mode.",
         })
 
-    try:
-        from system_utils.reaper import get_reaper_source
-
-        data = await request.get_json() or {}
-        manual = data.get("manual", True)
-
-        source = get_reaper_source()
-        await source.start(manual=manual)
-
-        return jsonify({
-            "status": "started",
-            "mode": "manual" if manual else "reaper"
-        })
-        
-    except ImportError as e:
-        return jsonify({
-            "error": "Audio recognition not available",
-            "details": str(e)
-        }), 500
-    except Exception as e:
-        logger.error(f"Audio recognition start error: {e}")
-        return jsonify({"error": str(e)}), 500
+    return jsonify({
+        "status": "udp_only",
+        "mode": "udp",
+        "message": "UDP recognition starts with the add-on; local capture sources are disabled.",
+    })
 
 
 @app.route('/api/audio-recognition/stop', methods=['POST'])
@@ -3175,424 +2469,93 @@ async def audio_recognition_stop():
             "message": "UDP multi-instance mode is active; stop via addon config.",
         })
 
-    try:
-        from system_utils.reaper import get_reaper_source
-
-        source = get_reaper_source()
-        await source.stop()
-
-        return jsonify({"status": "stopped"})
-        
-    except ImportError as e:
-        return jsonify({
-            "error": "Audio recognition not available",
-            "details": str(e)
-        }), 500
-    except Exception as e:
-        logger.error(f"Audio recognition stop error: {e}")
-        return jsonify({"error": str(e)}), 500
+    return jsonify({
+        "status": "udp_only",
+        "mode": "udp",
+        "message": "UDP recognition is managed by add-on startup configuration.",
+    })
 
 
 @app.route('/api/audio-recognition/devices', methods=['GET'])
 async def audio_recognition_devices():
-    """
-    List available audio capture devices.
-    Returns device list with auto-detected loopback recommendation.
-    """
-    try:
-        # Direct import from capture.py to avoid triggering shazamio/pydub import
-        # via __init__.py when just listing devices (user hasn't clicked Start yet)
-        from audio_recognition.capture import AudioCaptureManager
-        
-        # Use async methods to avoid blocking event loop with sd.query_devices()
-        devices = await AudioCaptureManager.list_devices_async()
-        
-        # Post-processing filter to clean up the list for UI
-        # 1. Filter out devices with 0 input channels (handled in capture.py, but safe to double check)
-        # 2. Prefer MME (0) and WASAPI (typically 1 or 2) over weird ones
-        # 3. Sort Loopback to top
-        
-        # Valid host APIs: 0=MME, 1=DirectSound, 2=WASAPI
-        # We usually want to avoid WDM-KS (often duplicates) or ASIO (unless user wants it)
-        # For a "Clean" list, let's keep it simple: Just inputs > 0
-        
-        filtered_devices = []
-        for d in devices:
-            # Filter out "Modem", "Fax", and clearly non-audio devices if any
-            name = d.get('name', '').lower()
-            if 'modem' in name or 'fax' in name:
-                continue
-            filtered_devices.append(d)
-            
-        # Sort Loopback devices to the top, then by name
-        filtered_devices.sort(key=lambda x: (not x.get('is_loopback', False), x.get('name', '')))
-        
-        recommended = await AudioCaptureManager.find_loopback_device_async()
-        
-        return jsonify({
-            "devices": filtered_devices,
-            "recommended": recommended,
-            "count": len(filtered_devices)
-        })
-        
-    except ImportError as e:
-        return jsonify({
-            "error": "Audio recognition not available",
-            "details": str(e),
-            "devices": []
-        }), 500
-    except Exception as e:
-        logger.error(f"Audio recognition devices error: {e}")
-        return jsonify({"error": str(e)}), 500
+    """UDP-only compatibility endpoint: no local capture devices are exposed."""
+    from config import UDP_AUDIO
+    return jsonify({
+        "devices": [{
+            "id": "udp",
+            "name": f"UDP audio on port {UDP_AUDIO.get('port', 6056)}",
+            "is_udp": True,
+            "sample_rate": UDP_AUDIO.get("sample_rate", 16000),
+        }],
+        "recommended": "udp",
+        "count": 1,
+        "udp_only": True,
+    })
 
 
 @app.route('/api/audio-recognition/config', methods=['GET'])
 async def audio_recognition_get_config():
-    """
-    Get current audio recognition config with session overrides applied.
-    
-    Returns:
-        config: Merged configuration (session overrides > settings.json > defaults)
-        status: Current recognition status
-        session_overrides_active: Whether any session overrides are in effect
-    """
-    import sys
-    
-    # Guard: Don't import reaper unless necessary
-    if 'system_utils.reaper' not in sys.modules:
-        from config import AUDIO_RECOGNITION
-        if not AUDIO_RECOGNITION.get("enabled", False):
-            # Return config without importing reaper
-            from system_utils.session_config import (
-                get_audio_config_with_overrides, 
-                has_session_overrides,
-                get_active_overrides
-            )
-            return jsonify({
-                "config": get_audio_config_with_overrides(),
-                "status": {"active": False},
-                "session_overrides_active": has_session_overrides(),
-                "active_overrides": get_active_overrides()
-            })
-    
-    try:
-        from system_utils.session_config import (
-            get_audio_config_with_overrides, 
-            has_session_overrides,
-            get_active_overrides
-        )
-        from system_utils.reaper import get_reaper_source
-        
-        config = get_audio_config_with_overrides()
-        source = get_reaper_source()
-        
-        # Check if HTTPS is actually available (certs exist)
-        from pathlib import Path
-        from config import SERVER
-        https_config = SERVER.get("https", {})
-        https_enabled = https_config.get("enabled", False)
-        cert_file = Path(https_config.get("cert_file", "certs/server.crt"))
-        https_available = https_enabled and cert_file.exists()
-        
-        return jsonify({
-            "config": config,
-            "status": source.get_status() if source else {},
-            "session_overrides_active": has_session_overrides(),
-            "active_overrides": get_active_overrides(),
-            "https_available": https_available  # Frontend can check this for mic mode
-        })
-        
-    except ImportError as e:
-        return jsonify({
-            "error": "Audio recognition not available",
-            "details": str(e)
-        }), 500
-    except Exception as e:
-        logger.error(f"Audio recognition config error: {e}")
-        return jsonify({"error": str(e)}), 500
+    """Return UDP-only recognition configuration."""
+    from config import AUDIO_RECOGNITION, UDP_AUDIO
+    mgr = _get_player_manager_if_running()
+    status = {
+        "active": bool(mgr and mgr.is_running),
+        "running": bool(mgr and mgr.is_running),
+        "mode": "udp",
+        "capture_mode": "udp",
+        "udp_only": True,
+    }
+    return jsonify({
+        "config": {
+            "enabled": AUDIO_RECOGNITION.get("enabled", True),
+            "mode": "udp",
+            "capture_duration": AUDIO_RECOGNITION.get("capture_duration", 6.0),
+            "recognition_interval": AUDIO_RECOGNITION.get("recognition_interval", 4.0),
+            "latency_offset": AUDIO_RECOGNITION.get("latency_offset", 0.0),
+            "silence_threshold": AUDIO_RECOGNITION.get("silence_threshold", 350),
+            "udp_port": UDP_AUDIO.get("port", 6056),
+            "udp_sample_rate": UDP_AUDIO.get("sample_rate", 16000),
+        },
+        "status": status,
+        "session_overrides_active": False,
+        "active_overrides": {},
+        "https_available": True,
+        "udp_only": True,
+    })
 
 
 @app.route('/api/audio-recognition/configure', methods=['POST'])
 async def audio_recognition_configure():
-    """
-    Set session-level config overrides (not persisted to settings.json).
-    
-    Body: {
-        "enabled": bool,           // Enable/disable recognition
-        "device_id": int | null,   // Backend device ID
-        "device_name": str | null, // Backend device name
-        "mode": "backend" | "frontend", // Capture mode
-        "reaper_auto_detect": bool,     // Auto-start when Reaper detected
-        "recognition_interval": float,  // Seconds between recognitions
-        "capture_duration": float,      // Audio capture duration
-        "latency_offset": float         // Position offset
-    }
-    
-    Returns:
-        status: "configured"
-        config: New effective configuration
-        active_overrides: Which overrides are now active
-    """
-    try:
-        from system_utils.session_config import (
-            set_session_override,
-            get_audio_config_with_overrides,
-            get_active_overrides
-        )
-        from system_utils.reaper import get_reaper_source
-        
-        data = await request.get_json() or {}
-        
-        # Log received config for debugging
-        logger.info(f"Audio recognition config received: {data}")
-        
-        # Apply session overrides for all provided keys
-        valid_keys = [
-            "enabled", "device_id", "device_name", "mode",
-            "reaper_auto_detect", "recognition_interval",
-            "capture_duration", "latency_offset", "silence_threshold"
-        ]
-        
-        # Apply session overrides with STRICT type conversion
-        # This prevents "can only concatenate str to str" errors in the engine
-        
-        # 1. Integers
-        if "device_id" in data:
-            val = data["device_id"]
-            if val is None or val == "":
-                set_session_override("device_id", None)
-            else:
-                try:
-                    set_session_override("device_id", int(val))
-                except (ValueError, TypeError):
-                    logger.warning(f"Invalid device_id: {val}")
-
-        # 2. Floats
-        float_keys = ["recognition_interval", "capture_duration", "latency_offset"]
-        for key in float_keys:
-            if key in data:
-                try:
-                    set_session_override(key, float(data[key]))
-                except (ValueError, TypeError):
-                    logger.warning(f"Invalid float for {key}: {data[key]}")
-
-        # 2b. Integers (silence_threshold is int, not float)
-        if "silence_threshold" in data:
-            try:
-                set_session_override("silence_threshold", int(data["silence_threshold"]))
-            except (ValueError, TypeError):
-                logger.warning(f"Invalid silence_threshold: {data['silence_threshold']}")
-
-        # 3. Booleans
-        bool_keys = ["enabled", "reaper_auto_detect"]
-        for key in bool_keys:
-            if key in data:
-                # Handle string "true"/"false" if sent that way
-                val = data[key]
-                if isinstance(val, str):
-                    val = val.lower() in ('true', '1', 'yes', 'on')
-                set_session_override(key, bool(val))
-
-        # 4. Strings
-        str_keys = ["device_name", "mode"]
-        for key in str_keys:
-            if key in data:
-                set_session_override(key, str(data[key]) if data[key] is not None else None)
-        
-        # EVENT-DRIVEN: Set runtime flag for immediate effect in main loop
-        # This replaces polling session_config on every metadata fetch
-        if 'enabled' in data or 'reaper_auto_detect' in data:
-            from system_utils.metadata import set_audio_rec_runtime_enabled
-            enabled = data.get('enabled', False)
-            auto_detect = data.get('reaper_auto_detect', False)
-            set_audio_rec_runtime_enabled(enabled, auto_detect)
-            
-            # Start/stop engine based on new state
-            if enabled:
-                source = get_reaper_source()
-                # Track if this is a frontend-initiated start
-                is_frontend_mode = data.get('mode') == 'frontend'
-                if not source.is_active:
-                    await source.start(manual=True)
-                    # Mark as frontend-started so WebSocket disconnect knows to stop
-                    source._frontend_started = is_frontend_mode
-            else:
-                import sys
-                if 'system_utils.reaper' in sys.modules:
-                    source = get_reaper_source()
-                    if source.is_active:
-                        await source.stop()
-        
-        # Get the new effective config
-        effective_config = get_audio_config_with_overrides()
-        
-        return jsonify({
-            "status": "configured",
-            "config": effective_config,
-            "active_overrides": get_active_overrides()
-        })
-        
-    except ImportError as e:
-        return jsonify({
-            "error": "Audio recognition not available",
-            "details": str(e)
-        }), 500
-    except Exception as e:
-        logger.error(f"Audio recognition configure error: {e}")
-        return jsonify({"error": str(e)}), 500
+    """UDP-only compatibility endpoint; local input selection is disabled."""
+    from config import AUDIO_RECOGNITION, UDP_AUDIO
+    data = await request.get_json() or {}
+    allowed_runtime = {"recognition_interval", "capture_duration", "latency_offset", "silence_threshold"}
+    ignored = sorted(set(data) - allowed_runtime)
+    return jsonify({
+        "status": "udp_only",
+        "config": {
+            "enabled": AUDIO_RECOGNITION.get("enabled", True),
+            "mode": "udp",
+            "capture_duration": AUDIO_RECOGNITION.get("capture_duration", 6.0),
+            "recognition_interval": AUDIO_RECOGNITION.get("recognition_interval", 4.0),
+            "latency_offset": AUDIO_RECOGNITION.get("latency_offset", 0.0),
+            "silence_threshold": AUDIO_RECOGNITION.get("silence_threshold", 350),
+            "udp_port": UDP_AUDIO.get("port", 6056),
+            "udp_sample_rate": UDP_AUDIO.get("sample_rate", 16000),
+        },
+        "active_overrides": {},
+        "ignored_fields": ignored,
+        "message": "UDP input is fixed; browser mic, local devices, and Reaper controls are disabled.",
+    })
 
 
 @app.websocket('/ws/audio-stream')
 async def audio_stream_websocket():
-    """
-    WebSocket endpoint for frontend microphone audio streaming.
-    
-    Protocol:
-        - Client sends binary Int16 PCM chunks (44100 Hz, mono, little-endian)
-        - Server responds with JSON messages:
-            - {"type": "connected", "capture_duration": float}
-            - {"type": "recognition", "artist": str, "title": str, "position": float}
-            - {"type": "no_match"}
-            - {"type": "error", "message": str}
-    
-    Design Note (R11):
-        The WebSocket handler does NOT trigger recognition directly.
-        Instead, it pushes audio data to the engine's input queue.
-        The engine's _run_loop pulls from this queue when in frontend mode,
-        keeping the state machine consistent for both backend and frontend modes.
-    """
-    frontend_queue = None
-    
-    try:
-        from system_utils.reaper import get_reaper_source
-        from system_utils.session_config import get_effective_value
-        
-        source = get_reaper_source()
-        
-        # Check if recognition is active
-        if not source:
-            await websocket.close(1008, "Audio recognition source not available")
-            return
-        
-        if not source._engine:
-            await websocket.close(1008, "Recognition engine not initialized")
-            return
-        
-        # Cancel any pending grace period task - frontend reconnected
-        if source._grace_task and not source._grace_task.done():
-            source._grace_task.cancel()
-            source._grace_task = None
-            logger.debug("Grace period cancelled - frontend reconnected")
-        
-        # Enable frontend mode and get the queue
-        frontend_queue = source._engine.enable_frontend_mode()
-        
-        # Get capture duration for client info
-        capture_duration = get_effective_value("capture_duration", 5.0)
-        
-        # Send connection confirmation
-        await websocket.send_json({
-            "type": "connected",
-            "capture_duration": capture_duration
-        })
-        
-        logger.info("Frontend audio WebSocket connected")
-        
-        # Main receive loop
-        while True:
-            try:
-                # Receive binary audio data from client
-                data = await websocket.receive()
-                
-                if isinstance(data, bytes):
-                    # Push to frontend queue (async method)
-                    await frontend_queue.push(data)
-                else:
-                    # Text message - check for commands
-                    if isinstance(data, str):
-                        try:
-                            cmd = json.loads(data)
-                            if cmd.get("type") == "ping":
-                                await websocket.send_json({"type": "pong"})
-                        except json.JSONDecodeError:
-                            pass
-                            
-            except asyncio.CancelledError:
-                logger.info("Frontend audio WebSocket cancelled")
-                break
-                
-    except Exception as e:
-        logger.error(f"Frontend audio WebSocket error: {e}")
-        try:
-            await websocket.send_json({
-                "type": "error",
-                "message": str(e)
-            })
-        except:
-            pass
-    finally:
-        # Grace period before stopping engine on WebSocket disconnect
-        # This handles temporary disconnects (browser refresh, tab switch, network blip)
-        # and allows the frontend to reconnect without losing the recognition session
-        GRACE_PERIOD_SECONDS = 10
-        
-        if frontend_queue:
-            try:
-                from system_utils.reaper import get_reaper_source
-                from system_utils import create_tracked_task
-                
-                source = get_reaper_source()
-                if source and source._engine:
-                    # First disable frontend mode (switches to backend capture if available)
-                    source._engine.disable_frontend_mode()
-                    
-                    # Only apply grace period if this frontend session started the engine
-                    if source._frontend_started:
-                        # Cancel any existing grace period task (handles rapid disconnects)
-                        if source._grace_task and not source._grace_task.done():
-                            source._grace_task.cancel()
-                            logger.debug("Cancelled previous grace period task")
-                        
-                        logger.info(f"Frontend disconnected, waiting {GRACE_PERIOD_SECONDS}s for reconnection...")
-                        
-                        # Schedule delayed cleanup - gives frontend time to reconnect
-                        async def delayed_engine_cleanup():
-                            await asyncio.sleep(GRACE_PERIOD_SECONDS)
-                            
-                            # Check if frontend reconnected during grace period
-                            if source._engine and source._engine._frontend_mode:
-                                logger.info("Frontend reconnected during grace period, engine continues")
-                                source._grace_task = None
-                                return
-                            
-                            # No reconnection - stop the engine
-                            if source._frontend_started:
-                                await source.stop()
-                                source._frontend_started = False
-                                logger.info(f"Stopped audio recognition engine (no reconnection after {GRACE_PERIOD_SECONDS}s)")
-                            source._grace_task = None
-                        
-                        source._grace_task = create_tracked_task(delayed_engine_cleanup())
-                    else:
-                        logger.debug("Frontend disconnected but backend engine preserved")
-            except Exception as e:
-                logger.debug(f"Error handling WebSocket disconnect: {e}")
-        logger.info("Frontend audio WebSocket disconnected")
+    """Browser microphone streaming is disabled in the UDP-only add-on."""
+    await websocket.close(1008, "Browser microphone input is disabled; send audio over UDP.")
 
 
-@app.websocket('/ws/spicetify')
-async def spicetify_websocket():
-    """
-    WebSocket endpoint for Spicetify bridge (Spotify Desktop extension).
-    
-    Receives real-time playback data from the Spicetify browser extension:
-    - Position updates every 100ms
-    - Track metadata on song change
-    - Audio analysis data
-    - Color extraction (may be null)
-    """
-    from system_utils.spicetify import handle_spicetify_connection
-    await handle_spicetify_connection()
+# Spicetify bridge is intentionally not exposed in the UDP-only add-on.
 
 
 # --- System Routes ---
@@ -3753,84 +2716,9 @@ async def get_client_config():
 
 @app.route("/callback")
 async def spotify_callback():
-    """
-    Handle Spotify OAuth callback.
-    This route receives the authorization code from Spotify after the user logs in.
-    """
-    # Get the authorization code from query parameters
-    code = request.args.get('code')
-    error = request.args.get('error')
-    
-    # Check for errors from Spotify
-    if error:
-        logger.error(f"Spotify OAuth error: {error}")
-        return """
-        <html>
-        <head><title>Spotify Login Failed</title></head>
-        <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
-            <h1>❌ Login Failed</h1>
-            <p>Spotify authentication was cancelled or failed.</p>
-            <p><a href="/">Return to Home</a></p>
-        </body>
-        </html>
-        """, 400
-    
-    if not code:
-        logger.error("No authorization code received from Spotify")
-        return """
-        <html>
-        <head><title>Spotify Login Failed</title></head>
-        <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
-            <h1>❌ Login Failed</h1>
-            <p>No authorization code received from Spotify.</p>
-            <p><a href="/">Return to Home</a></p>
-        </body>
-        </html>
-        """, 400
-    
-    # Get the shared singleton client and complete authentication
-    # The singleton ensures all parts of the app share the same authenticated instance
-    client = get_shared_spotify_client()
-    
-    # Complete the authentication flow
-    success, auth_error = await client.complete_auth(code)
-    
-    if success:
-        # No need to update globals - the singleton pattern handles this automatically
-        logger.info("Spotify authentication successful")
-        return """
-        <html>
-        <head><title>Spotify Login Successful</title></head>
-        <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
-            <h1>✅ Login Successful!</h1>
-            <p>You have successfully connected to Spotify.</p>
-            <p>Redirecting to home page...</p>
-            <script>
-                setTimeout(function() {
-                    window.location.href = '/';
-                }, 2000);
-            </script>
-            <p><a href="/">Click here if you are not redirected</a></p>
-        </body>
-        </html>
-        """
-    else:
-        logger.error(f"Failed to complete Spotify authentication: {auth_error}")
-        error_detail = f"<p><code>{auth_error}</code></p>" if auth_error else ""
-        return f"""
-        <html>
-        <head><title>Spotify Login Failed</title></head>
-        <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
-            <h1>❌ Login Failed</h1>
-            <p>Failed to complete Spotify authentication. Please try again.</p>
-            {error_detail}
-            <p><a href="/">Return to Home</a></p>
-        </body>
-        </html>
-        """, 500
+    """Spotify OAuth is disabled in the UDP-only add-on."""
+    return "Spotify app control/OAuth is disabled in SyncLyricsUDP.", 410
 
-# --- Media Browser Routes ---
-# Serves embedded Spotify UI client and Music Assistant iframe
 
 @app.route('/media-browser/')
 @app.route('/media-browser/<path:subpath>')
@@ -3902,33 +2790,9 @@ async def media_browser(subpath='index.html'):
 
 @app.route('/api/spotify/browser-token')
 async def get_spotify_browser_token():
-    """
-    Return fresh access token for Spotify browser client.
-    The React client uses this token for API calls.
-    """
-    client = get_spotify_client()
-    
-    if not client:
-        return jsonify({'error': 'Spotify not authenticated'}), 401
-    
-    try:
-        # Get fresh access token from Spotipy auth manager
-        token_info = client.sp.auth_manager.get_access_token(as_dict=True)
-        
-        if token_info and 'access_token' in token_info:
-            return jsonify({
-                'access_token': token_info['access_token'],
-                'expires_in': token_info.get('expires_in', 3600)
-            })
-        else:
-            return jsonify({'error': 'Failed to get token'}), 500
-            
-    except Exception as e:
-        logger.error(f"Failed to get Spotify browser token: {e}")
-        return jsonify({'error': str(e)}), 500
+    """Spotify app browser integration is disabled in the UDP-only add-on."""
+    return jsonify({"error": "Spotify app integration is disabled in SyncLyricsUDP"}), 410
 
-
-# Add this new route near other /api routes, e.g. after /api/artist/images
 
 @app.route('/api/slideshow/random-images')
 async def get_random_slideshow_images():

@@ -1,8 +1,7 @@
 /**
  * Audio Source Module
  * 
- * Manages the audio source selection modal and state.
- * Handles device enumeration, recognition control, and status updates.
+ * Shows fixed UDP recognition status for the UDP-only add-on.
  */
 
 import {
@@ -15,7 +14,6 @@ import {
 } from './api.js';
 
 import { showToast } from './dom.js';
-import audioCapture from './audioCapture.js';
 
 // =============================================================================
 // State
@@ -25,7 +23,7 @@ let isModalOpen = false;
 let pollInterval = null;
 let currentConfig = null;
 let isActive = false;
-let isFrontendCapture = false; // True if currently using frontend mic capture
+let isFrontendCapture = false; // Deprecated compatibility flag; frontend mic is disabled
 let currentTrackSource = null; // Default: no source (shows Idle)
 let lastKnownProvider = null; // Last known recognition provider (prevents flashing)
 
@@ -146,124 +144,17 @@ async function loadDevices() {
 
     try {
         const result = await getAudioRecognitionDevices();
-
-        if (result.error) {
-            console.warn('Failed to load devices:', result.error);
-            return;
-        }
-
-        // Build options
-        const backendOptgroup = document.createElement('optgroup');
-        backendOptgroup.label = 'System Audio (Backend)';
-
-        const devices = result.devices || [];
-        const recommended = result.recommended;
-
-        // Add "Auto" option first if there's a recommended device
-        // Fix 3.2: recommended is an integer (device ID), not an object
-        if (recommended !== null && recommended !== undefined) {
-            const recommendedDevice = devices.find(d => d.id === recommended);
-            const deviceName = recommendedDevice ? recommendedDevice.name : `Device ${recommended}`;
-            const apiLabel = recommendedDevice?.api ? ` [${recommendedDevice.api}]` : '';
-            const autoOpt = document.createElement('option');
-            autoOpt.value = 'backend:auto';
-            autoOpt.textContent = `Auto (${deviceName})${apiLabel}`;
-            backendOptgroup.appendChild(autoOpt);
-
-            // Update quick-start backend device name
-            if (elements.backendDeviceName) {
-                elements.backendDeviceName.textContent = `Auto (${deviceName})`;
-            }
-        }
-
-        if (devices.length === 0) {
-            const opt = document.createElement('option');
-            opt.value = '';
-            opt.textContent = 'No devices available';
-            opt.disabled = true;
-            backendOptgroup.appendChild(opt);
-        } else {
-            devices.forEach(device => {
-                const opt = document.createElement('option');
-                opt.value = `backend:${device.id}`;
-                // Show API name for clarity (e.g., "Loopback (MOTU M Series) [MME]")
-                const apiLabel = device.api ? ` [${device.api}]` : '';
-                opt.textContent = `${device.name}${apiLabel}`;
-                backendOptgroup.appendChild(opt);
-            });
-        }
-
-        // Frontend (browser mic) options
-        const frontendOptgroup = document.createElement('optgroup');
-        frontendOptgroup.label = 'Browser Microphone (Frontend)';
-
-        // Try to enumerate browser mics
-        try {
-            if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
-                const mediaDevices = await navigator.mediaDevices.enumerateDevices();
-                const audioInputs = mediaDevices.filter(d => d.kind === 'audioinput');
-
-                audioInputs.forEach(device => {
-                    const opt = document.createElement('option');
-                    opt.value = `frontend:${device.deviceId || 'default'}`;
-                    opt.textContent = device.label || 'Microphone';
-                    frontendOptgroup.appendChild(opt);
-                });
-
-                if (audioInputs.length === 0) {
-                    const opt = document.createElement('option');
-                    opt.value = 'frontend:default';
-                    opt.textContent = 'Default Microphone';
-                    frontendOptgroup.appendChild(opt);
-                }
-            }
-        } catch (e) {
-            // Browser mic enumeration failed, add default option
-            const opt = document.createElement('option');
-            opt.value = 'frontend:default';
-            opt.textContent = 'Default Microphone';
-            frontendOptgroup.appendChild(opt);
-        }
-
-        // Clear and rebuild select
+        const udp = (result.devices || [])[0];
         select.innerHTML = '';
-        select.appendChild(backendOptgroup);
-        select.appendChild(frontendOptgroup);
-
-        // Detect if running on mobile/tablet (no backend devices available)
-        const isMobile = /Android|iPhone|iPad|iPod|Mobile|Tablet/i.test(navigator.userAgent);
-        const hasBackendDevices = devices.length > 0;
-
-        // Select current device based on config, or smart default
-        if (currentConfig) {
-            const mode = currentConfig.mode || 'backend';
-            const deviceId = currentConfig.device_id;
-
-            if (mode === 'frontend') {
-                select.value = 'frontend:default';
-            } else if (deviceId !== null && deviceId !== undefined) {
-                select.value = `backend:${deviceId}`;
-            } else {
-                // Default to Auto if no specific device configured
-                select.value = 'backend:auto';
-            }
-        } else {
-            // Smart default: frontend mic on mobile, backend auto on desktop
-            if (isMobile || !hasBackendDevices) {
-                select.value = 'frontend:default';
-            } else {
-                select.value = 'backend:auto';
-            }
-        }
-
+        const opt = document.createElement('option');
+        opt.value = 'udp';
+        opt.textContent = udp?.name || 'UDP audio';
+        select.appendChild(opt);
+        select.value = 'udp';
     } catch (error) {
-        console.error('Error loading devices:', error);
+        console.error('Error loading UDP source:', error);
     }
 }
-
-// =============================================================================
-// Config Loading
-// =============================================================================
 
 async function loadConfig() {
     try {
@@ -402,117 +293,16 @@ function updateStatusDisplay(status) {
     if (elements.enrichmentRow && elements.enrichmentStatus) {
         if (status.current_song && status.current_song.album_art_url) {
             elements.enrichmentRow.style.display = 'flex';
-            // Check if enriched (has Spotify URL or proper album art)
-            const isEnriched = status.current_song.album_art_url.includes('scdn.co') ||
-                status.current_song.spotify_url;
-            elements.enrichmentStatus.textContent = isEnriched ? '☑ Spotify' : '☐ Shazam only';
-            elements.enrichmentStatus.className = isEnriched ? 'status-value enriched' : 'status-value';
+            elements.enrichmentStatus.textContent = '☑ Metadata';
+            elements.enrichmentStatus.className = 'status-value enriched';
         } else {
             elements.enrichmentRow.style.display = 'none';
         }
     }
 
-    // Update button text - show current source
+    // Update button text - source is fixed to UDP in this add-on.
     if (elements.sourceName) {
-        if (status.active) {
-            // Audio recognition is active - show actual recognition provider
-            if (status.capture_mode === 'frontend') {
-                elements.sourceName.textContent = 'Mic';
-            } else {
-                // Use recognition_provider from current_song
-                // IMPORTANT: Always use current provider, don't cache stale values
-                const provider = status.current_song?.recognition_provider;
-                if (provider === 'acrcloud') {
-                    elements.sourceName.textContent = 'ACRCloud';
-                } else if (provider === 'local_fingerprint') {
-                    elements.sourceName.textContent = 'Local FP';
-                } else if (provider === 'shazam') {
-                    elements.sourceName.textContent = 'Shazam';
-                } else if (status.current_song) {
-                    // Have a song but no provider - default to Shazam (the primary recognizer)
-                    elements.sourceName.textContent = 'Shazam';
-                } else {
-                    // No song yet - show generic
-                    elements.sourceName.textContent = 'Audio';
-                }
-            }
-        } else {
-            // Audio recognition not active - reset provider tracking
-            lastKnownProvider = null;
-            
-            // Show current track source
-            const sourceMap = {
-                'spotify': 'Spotify',
-                'spotify_hybrid': 'Hybrid',
-                'spotifyhybrid': 'Hybrid',
-                'spicetify': 'Spicetify',
-                'windows': 'Windows',
-                'windows_media': 'Windows',
-                'windowsmedia': 'Windows',
-                'audio_recognition': 'Shazam',
-                'audiorecognition': 'Shazam',
-                'shazam': 'Shazam',
-                'acrcloud': 'ACRCloud',
-                'local_fingerprint': 'Local',
-                'reaper': 'Reaper',
-                'music_assistant': 'Music Assistant',
-                'linux': 'Linux',
-                'macos': 'Mac'
-            };
-            const displaySource = sourceMap[currentTrackSource] || 'Idle';
-            elements.sourceName.textContent = displaySource;
-        }
-    }
-
-    // Update current song (if active)
-    if (status.current_song && status.current_song.title) {
-        if (elements.currentSongInfo) {
-            elements.currentSongInfo.style.display = 'block';
-        }
-        if (elements.currentSongTitle) {
-            elements.currentSongTitle.textContent = status.current_song.title;
-        }
-        if (elements.currentSongArtist) {
-            elements.currentSongArtist.textContent = status.current_song.artist || '—';
-        }
-    } else {
-        if (elements.currentSongInfo) {
-            elements.currentSongInfo.style.display = 'none';
-        }
-    }
-}
-
-function updateButtonState() {
-    // Update toggle button text and style
-    if (elements.toggleBtn) {
-        if (isActive) {
-            elements.toggleBtn.textContent = '⏹ Stop Recognition';
-            elements.toggleBtn.classList.remove('start');
-            elements.toggleBtn.classList.add('stop');
-        } else {
-            elements.toggleBtn.textContent = '▶ Start Recognition';
-            elements.toggleBtn.classList.remove('stop');
-            elements.toggleBtn.classList.add('start');
-        }
-    }
-
-    // Show/hide audio level container
-    if (elements.audioLevelContainer) {
-        elements.audioLevelContainer.style.display = isActive ? 'block' : 'none';
-    }
-
-    // Disable quick-start buttons when active
-    if (elements.quickStartBackendBtn) {
-        elements.quickStartBackendBtn.disabled = isActive;
-        elements.quickStartBackendBtn.textContent = isActive ? 'Running' : '▶ Start';
-    }
-    if (elements.quickStartFrontendBtn) {
-        elements.quickStartFrontendBtn.disabled = isActive;
-        elements.quickStartFrontendBtn.textContent = isActive ? 'Running' : '▶ Start';
-    }
-    if (elements.quickStartUdpBtn) {
-        elements.quickStartUdpBtn.disabled = isActive;
-        elements.quickStartUdpBtn.textContent = isActive ? 'Running' : '▶ Start';
+        elements.sourceName.textContent = status.active ? 'UDP' : 'UDP Idle';
     }
 
     // Toggle recording indicator on source button
@@ -543,49 +333,12 @@ function stopPolling() {
 // Recognition Control
 // =============================================================================
 
-async function handleStart(overrideMode = null) {
-    const select = elements.deviceSelect;
-    if (!select) return;
-
-    const value = select.value;
-    let [mode, deviceId] = value.split(':');
-    
-    // Use override mode if provided (from Quick Start)
-    if (overrideMode) {
-        mode = overrideMode;
-        if (overrideMode === 'frontend') {
-            deviceId = 'default';
-        } else {
-            deviceId = 'auto';
-        }
-    }
-
-    // UDP mode uses the backend engine (UDP listener is started via config)
-    if (mode === 'udp') {
-        mode = 'backend';
-    }
-
-    // Check HTTPS for frontend mode
-    if (mode === 'frontend' && !isSecureContext()) {
-        showHttpsWarning();
-        return;
-    }
-
-    // Build config update
+async function handleStart(mode = 'udp') {
     const configUpdate = {
-        mode: mode,
-        enabled: true
+        enabled: true,
+        mode: 'udp'
     };
 
-    // Only set device_id for specific device selection, not for 'auto'
-    if (mode === 'backend' && deviceId && deviceId !== 'auto') {
-        configUpdate.device_id = parseInt(deviceId, 10);
-    } else if (mode === 'backend' && deviceId === 'auto') {
-        // Auto mode - explicitly set to null so backend uses auto-detection
-        configUpdate.device_id = null;
-    }
-
-    // Apply advanced settings
     if (elements.recognitionInterval) {
         configUpdate.recognition_interval = parseFloat(elements.recognitionInterval.value);
     }
@@ -600,81 +353,28 @@ async function handleStart(overrideMode = null) {
     }
 
     try {
-        // Apply config to backend
         await setAudioRecognitionConfig(configUpdate);
-
-        if (mode === 'frontend') {
-            // FRONTEND MODE: Start browser mic capture
-            isFrontendCapture = true;
-
-            // CRITICAL: Start the recognition engine FIRST, before WebSocket connects
-            // The WebSocket handler checks if engine is running and disconnects if not
-            const startResult = await startAudioRecognition();
-            if (startResult.error) {
-                console.error('Failed to start recognition engine:', startResult.error);
-                isFrontendCapture = false;
-                return;
-            }
-
-            // Now start capture - this connects WebSocket which switches engine to frontend mode
-            await audioCapture.startCapture(deviceId, {
-                onLevel: (level) => updateAudioLevel(level),
-                onStatus: (status) => console.log('[AudioSource] Capture status:', status),
-                onRecognition: (result) => {
-                    console.log('[AudioSource] Recognition:', result);
-                    // Status will be updated via polling
-                }
-            });
-
-            console.log('[AudioSource] Frontend capture started');
-        } else {
-            // BACKEND MODE: Use backend audio capture
-            isFrontendCapture = false;
-
-            const result = await startAudioRecognition();
-            if (result.error) {
-                console.error('Failed to start backend recognition:', result.error);
-                return;
-            }
+        const result = await startAudioRecognition();
+        if (result.error) {
+            console.error('Failed to confirm UDP recognition:', result.error);
+            return;
         }
-
-        // Refresh status
         await refreshStatus();
-
     } catch (error) {
-        console.error('Error starting recognition:', error);
-        // Stop any partial capture
-        if (isFrontendCapture) {
-            await audioCapture.stopCapture();
-            isFrontendCapture = false;
-        }
+        console.error('Error confirming UDP recognition:', error);
     }
 }
 
 async function handleStop() {
     try {
-        // Stop frontend capture if active
-        if (isFrontendCapture) {
-            await audioCapture.stopCapture();
-            isFrontendCapture = false;
-
-            console.log('[AudioSource] Frontend capture stopped');
-        }
-
-        // Always notify backend to stop
         const result = await stopAudioRecognition();
-
         if (result.error) {
-            console.error('Failed to stop backend recognition:', result.error);
+            console.error('Failed to update UDP recognition state:', result.error);
         }
-
-        // Reset provider tracking for next session
         lastKnownProvider = null;
-
         await refreshStatus();
-
     } catch (error) {
-        console.error('Error stopping recognition:', error);
+        console.error('Error updating UDP recognition state:', error);
     }
 }
 
@@ -683,44 +383,19 @@ async function handleStop() {
 // =============================================================================
 
 function handleDeviceChange() {
-    const select = elements.deviceSelect;
-    if (!select) return;
-
-    const value = select.value;
-    const [mode] = value.split(':');
-
-    // Show HTTPS warning if needed
-    if (mode === 'frontend' && !isSecureContext()) {
-        showHttpsWarning();
-    } else {
-        hideHttpsWarning();
-    }
+    // UDP source is fixed; no local device selection is available.
 }
 
-// =============================================================================
-// Utilities
-// =============================================================================
-
 function isSecureContext() {
-    return window.isSecureContext ||
-        location.protocol === 'https:' ||
-        location.hostname === 'localhost' ||
-        location.hostname === '127.0.0.1';
+    return true;
 }
 
 function showHttpsWarning() {
-    // Show inline warning in modal (if visible)
-    if (elements.httpsWarning) {
-        elements.httpsWarning.classList.add('visible');
-    }
-    // Also show a toast so user definitely sees the message
-    showToast('🎤 Browser microphone requires HTTPS. Use System Audio instead, or switch to HTTPS.', 'error', 5000);
+    // No-op: browser microphone input is disabled.
 }
 
 function hideHttpsWarning() {
-    if (elements.httpsWarning) {
-        elements.httpsWarning.classList.remove('visible');
-    }
+    // No-op: browser microphone input is disabled.
 }
 
 function capitalizeFirst(str) {
@@ -808,9 +483,6 @@ export function init() {
     if (elements.quickStartBackendBtn) {
         elements.quickStartBackendBtn.addEventListener('click', () => handleQuickStart('backend'));
     }
-    if (elements.quickStartFrontendBtn) {
-        elements.quickStartFrontendBtn.addEventListener('click', () => handleQuickStart('frontend'));
-    }
     if (elements.quickStartUdpBtn) {
         elements.quickStartUdpBtn.addEventListener('click', () => handleQuickStart('udp'));
     }
@@ -848,18 +520,10 @@ export function init() {
 
 // Quick-start handler
 async function handleQuickStart(mode) {
-    // Set device select to appropriate value (for visual consistency)
     if (elements.deviceSelect) {
-        if (mode === 'backend') {
-            elements.deviceSelect.value = 'backend:auto';
-        } else if (mode === 'udp') {
-            elements.deviceSelect.value = 'backend:auto';  // UDP uses backend engine
-        } else {
-            elements.deviceSelect.value = 'frontend:default';
-        }
+        elements.deviceSelect.value = 'udp';
     }
-    // Pass mode directly to avoid race condition with dropdown options
-    await handleStart(mode);
+    await handleStart('udp');
 }
 
 // Setup slider with value display and immediate apply

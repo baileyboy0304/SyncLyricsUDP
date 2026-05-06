@@ -136,7 +136,7 @@ RESOURCES_DIR = ROOT_DIR / "resources"
 DATABASE_DIR = Path(os.getenv("SYNCLYRICS_LYRICS_DB", str(DATA_DIR / "lyrics_database")))
 CACHE_DIR = Path(os.getenv("SYNCLYRICS_CACHE_DIR", str(DATA_DIR / "cache")))
 ALBUM_ART_DB_DIR = Path(os.getenv("SYNCLYRICS_ALBUM_ART_DB", str(DATA_DIR / "album_art_database")))
-SPICETIFY_DB_DIR = Path(os.getenv("SYNCLYRICS_SPICETIFY_DB", str(DATA_DIR / "spicetify_database")))
+SPICETIFY_DB_DIR = Path(os.getenv("SYNCLYRICS_SPICETIFY_DB", str(DATA_DIR / "spicetify_database")))  # Internal/deprecated cache path; not user-facing in UDP-only mode.
 CERTS_DIR = Path(os.getenv("SYNCLYRICS_CERTS_DIR", str(DATA_DIR / "certs")))
 
 # FIX: Wrap directory creation in try-except for permission errors
@@ -356,45 +356,18 @@ NOTIFICATIONS = {
     "icon_path": conf("notifications.icon_path", str(RESOURCES_DIR / "images" / "icon.ico"))
 }
 
-MEDIA_SOURCE = {
-    "sources": [
-        {
-            "name": "spicetify",
-            "enabled": _safe_bool(conf("media_source.spicetify.enabled"), True),
-            "priority": _safe_int(conf("media_source.spicetify.priority"), 0),
-        },
-        {
-            "name": "spotify",
-            "enabled": _safe_bool(conf("media_source.spotify.enabled"), True),
-            "priority": _safe_int(conf("media_source.spotify.priority"), 2),
-        },
-        {
-            "name": "windows_media",
-            "enabled": _safe_bool(conf("media_source.windows_media.enabled"), True),
-            "priority": _safe_int(conf("media_source.windows_media.priority"), 1),
-        }
-    ]
-}
+# UDP-only build: legacy desktop/app-control metadata sources are intentionally
+# not exposed or initialized. Recognition results arrive from UDP audio via
+# PlayerManager; lyric/metadata enrichment providers remain available elsewhere.
+MEDIA_SOURCE = {"sources": []}
 
 SYSTEM = {
-    "windows": {
-        "media_session": {
-            "enabled": _safe_bool(conf("system.windows.media_session.enabled"), True),
-            "preferred": _safe_bool(conf("system.windows.media_session.preferred"), True),
-            "timeout": _safe_int(conf("system.windows.media_session.timeout"), 5)
-        },
-        "paused_timeout": _safe_int(conf("system.windows.paused_timeout"), 600),  # 10 min default
-    },
-    "spotify": {
-        "paused_timeout": _safe_int(conf("system.spotify.paused_timeout"), 600),  # 10 min default
-    },
-    "spicetify": {
-        "paused_timeout": _safe_int(conf("system.spicetify.paused_timeout"), 600),  # 10 min default
-    },
-    "linux": {
-        "gsettings_enabled": _safe_bool(conf("system.linux.gsettings_enabled"), True),
-        "playerctl_required": _safe_bool(conf("system.linux.playerctl_required"), True)
-    }
+    # Internal/deprecated compatibility shims only. These old desktop/app
+    # input sources are disabled in the UDP-only add-on.
+    "windows": {"media_session": {"enabled": False, "preferred": False, "timeout": 0}, "paused_timeout": 0},
+    "spotify": {"paused_timeout": 0},
+    "spicetify": {"paused_timeout": 0},
+    "linux": {"gsettings_enabled": False, "playerctl_required": False}
 }
 
 FEATURES = {
@@ -408,7 +381,7 @@ FEATURES = {
     "album_art_db": _safe_bool(conf("features.album_art_db"), True),
     "word_sync_auto_switch": _safe_bool(conf("features.word_sync_auto_switch"), False),  # Respect provider priority
     "word_sync_default_enabled": _safe_bool(conf("features.word_sync_default_enabled"), True),  # Word-sync ON by default
-    "spicetify_database": _safe_bool(conf("features.spicetify_database"), True),  # Cache audio analysis from Spicetify
+    "spicetify_database": False,  # Internal/deprecated; old Spicetify source is disabled
 }
 
 ALBUM_ART = {
@@ -431,14 +404,13 @@ ARTIST_IMAGE = {
     "enable_fanart_albumcover": _safe_bool(conf("artist_image.enable_fanart_albumcover"), True)
 }
 
-# Audio Recognition (Reaper Integration)
-# Uses ShazamIO for song identification with latency-compensated position tracking
+# Audio Recognition (UDP input)
+# Uses recognizers for song identification with latency-compensated position tracking
 AUDIO_RECOGNITION = {
     "enabled": _safe_bool(conf("audio_recognition.enabled"), False),
-    # ENV override: REAPER_AUTO_DETECT=true in .env takes priority over settings.json
-    "reaper_auto_detect": os.getenv("REAPER_AUTO_DETECT", "").lower() == "true" or _safe_bool(conf("audio_recognition.reaper_auto_detect"), False),
-    "device_id": _safe_int(conf("audio_recognition.device_id"), None),  # None = auto-detect
-    "device_name": conf("audio_recognition.device_name", ""),
+    "reaper_auto_detect": False,
+    "device_id": None,
+    "device_name": "",
     "capture_duration": _safe_float(conf("audio_recognition.capture_duration"), 6.0),
     "recognition_interval": _safe_float(conf("audio_recognition.recognition_interval"), 4.0),
     "latency_offset": _safe_float(conf("audio_recognition.latency_offset"), 0.0),
@@ -446,8 +418,8 @@ AUDIO_RECOGNITION = {
     # Verification settings (anti-false-positive)
     "verification_cycles": _safe_int(conf("audio_recognition.verification_cycles"), 2),
     "verification_timeout_cycles": _safe_int(conf("audio_recognition.verification_timeout_cycles"), 4),
-    "reaper_validation_enabled": _safe_bool(conf("audio_recognition.reaper_validation_enabled"), False),
-    "reaper_validation_threshold": _safe_int(conf("audio_recognition.reaper_validation_threshold"), 80),
+    "reaper_validation_enabled": False,
+    "reaper_validation_threshold": 0,
 }
 
 # Local Audio Fingerprinting (Personal Feature - Disabled by Default)
@@ -488,7 +460,7 @@ AUDIO_BUFFER = {
 # Receives PCM audio over UDP for fingerprinting (e.g., from Home Assistant audio pipeline)
 # Supports raw PCM (16-bit LE mono) and RTP-encapsulated PCM (auto-detected)
 UDP_AUDIO = {
-    "enabled": _safe_bool(os.getenv("UDP_AUDIO_ENABLED") or conf("udp_audio.enabled"), False),
+    "enabled": _safe_bool(os.getenv("UDP_AUDIO_ENABLED") or conf("udp_audio.enabled"), True),
     "port": _safe_int(os.getenv("UDP_AUDIO_PORT") or conf("udp_audio.port"), 6056),
     "sample_rate": _safe_int(os.getenv("UDP_AUDIO_SAMPLE_RATE") or conf("udp_audio.sample_rate"), 16000),
     # Jitter buffer size in milliseconds for RTP packet reordering (0 = minimal buffering)
