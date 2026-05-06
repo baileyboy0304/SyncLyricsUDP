@@ -100,7 +100,7 @@ function debouncedSeek(positionMs) {
     seekTimeout = setTimeout(async () => {
         console.log(`[ProgressBar] Seeking to ${formatTime(positionMs / 1000)} (${positionMs}ms)`);
         try {
-            const result = await seekToPosition(positionMs);
+            const result = await seekToPosition(positionMs, lastTrackInfo && lastTrackInfo.player);
             if (result.error) {
                 showToast('Seek failed', 'error');
             }
@@ -128,7 +128,7 @@ export function attachControlHandlers(enterVisualModeFn = null, exitVisualModeFn
     if (prevBtn) {
         prevBtn.addEventListener('click', async () => {
             try {
-                await playbackCommand('previous');
+                await playbackCommand('previous', lastTrackInfo && lastTrackInfo.player);
             } catch (error) {
                 console.error('Previous track error:', error);
                 showToast('Failed to skip previous', 'error');
@@ -139,7 +139,7 @@ export function attachControlHandlers(enterVisualModeFn = null, exitVisualModeFn
     if (playPauseBtn) {
         playPauseBtn.addEventListener('click', async () => {
             try {
-                await playbackCommand('play-pause');
+                await playbackCommand('play-pause', lastTrackInfo && lastTrackInfo.player);
                 // Force immediate update of track info
                 setTimeout(async () => {
                     const trackInfo = await getCurrentTrack();
@@ -157,7 +157,7 @@ export function attachControlHandlers(enterVisualModeFn = null, exitVisualModeFn
     if (nextBtn) {
         nextBtn.addEventListener('click', async () => {
             try {
-                await playbackCommand('next');
+                await playbackCommand('next', lastTrackInfo && lastTrackInfo.player);
             } catch (error) {
                 console.error('Next track error:', error);
                 showToast('Failed to skip next', 'error');
@@ -286,15 +286,26 @@ export function updateControlState(trackInfo) {
     const playPauseBtn = document.getElementById('btn-play-pause');
     const nextBtn = document.getElementById('btn-next');
 
-    // Enable controls for Spotify, Spotify Hybrid, Spicetify, Windows Media, or plugin sources
-    // Note: Audio Recognition source does not support playback controls
+    // Enable controls for native playback sources, or for scoped recognition
+    // players that advertise a linked Music Assistant transport.
     const canControl =
+        trackInfo.can_control === true ||
         trackInfo.source === 'spotify' ||
         trackInfo.source === 'spotify_hybrid' ||
         trackInfo.source === 'spicetify' ||
         trackInfo.source === 'windows_media' ||
         trackInfo.source === 'music_assistant' ||
         trackInfo.source === 'linux';
+
+    console.debug('[Controls] updateControlState', {
+        player: trackInfo.player,
+        source: trackInfo.source,
+        controlsSource: trackInfo.controls_source,
+        canControlFlag: trackInfo.can_control,
+        canControl,
+        title: trackInfo.title,
+        artist: trackInfo.artist,
+    });
 
     if (prevBtn) prevBtn.disabled = !canControl;
     if (nextBtn) nextBtn.disabled = !canControl;
