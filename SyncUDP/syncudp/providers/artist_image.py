@@ -189,7 +189,7 @@ class ArtistImageProvider:
         # Set User-Agent header (required by Wikipedia API and best practice for other APIs)
         # Wikipedia specifically requires a User-Agent that identifies your application
         self.session.headers.update({
-            'User-Agent': 'SyncLyrics/1.0.0 (https://github.com/AnshulJ999/SyncLyrics; contact@example.com)'
+            'User-Agent': 'SyncLyrics/1.0.0 (https://github.com/baileyboy0304/SyncLyrics; contact@example.com)'
         })
         
         # Get timeout from config (default: 5 seconds)

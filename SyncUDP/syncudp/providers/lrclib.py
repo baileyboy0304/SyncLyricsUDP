@@ -21,8 +21,8 @@ class LRCLIBProvider(LyricsProvider):
     # Define constants for the API
     BASE_URL = "https://lrclib.net/api"
     HEADERS = {
-        "User-Agent": "SyncLyrics v1.0.0 (https://github.com/AnshulJ999/SyncLyrics)",
-        "Lrclib-Client": "SyncLyrics v1.0.0 (https://github.com/AnshulJ999/SyncLyrics)"
+        "User-Agent": "SyncLyrics v1.0.0 (https://github.com/baileyboy0304/SyncLyrics)",
+        "Lrclib-Client": "SyncLyrics v1.0.0 (https://github.com/baileyboy0304/SyncLyrics)"
     }
     
     def __init__(self):

@@ -94,4 +94,4 @@
 
 ## [1.9.0] - Previous Release
 
-See [GitHub Releases](https://github.com/AnshulJ999/SyncLyrics/releases) for earlier versions.
+See [GitHub Releases](https://github.com/baileyboy0304/SyncLyrics/releases) for earlier versions.
