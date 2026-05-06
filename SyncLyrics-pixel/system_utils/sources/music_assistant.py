@@ -595,14 +595,20 @@ class MusicAssistantSource(BaseMetadataSource):
             return None
     
     # === Playback Controls ===
-    
-    async def toggle_playback(self) -> bool:
-        """Toggle play/pause on the active queue."""
+
+    async def _get_control_queue_id(self, player_id: Optional[str] = None) -> Optional[str]:
+        """Return the queue to control, optionally scoped to a specific MA player."""
+        if player_id:
+            return await _get_active_queue_id(player_id)
+        return _current_queue_id or _current_player_id
+
+    async def toggle_playback(self, player_id: Optional[str] = None) -> bool:
+        """Toggle play/pause on the active queue or supplied MA player."""
         if not await _ensure_connected_nonblocking():
             return False
         
         try:
-            queue_id = _current_queue_id or _current_player_id
+            queue_id = await self._get_control_queue_id(player_id)
             if not queue_id:
                 return False
             
@@ -613,13 +619,13 @@ class MusicAssistantSource(BaseMetadataSource):
             logger.debug(f"Music Assistant toggle_playback failed: {e}")
             return False
     
-    async def play(self) -> bool:
-        """Resume playback."""
+    async def play(self, player_id: Optional[str] = None) -> bool:
+        """Resume playback on the active queue or supplied MA player."""
         if not await _ensure_connected_nonblocking():
             return False
         
         try:
-            queue_id = _current_queue_id or _current_player_id
+            queue_id = await self._get_control_queue_id(player_id)
             if not queue_id:
                 return False
             
@@ -629,13 +635,13 @@ class MusicAssistantSource(BaseMetadataSource):
             logger.debug(f"Music Assistant play failed: {e}")
             return False
     
-    async def pause(self) -> bool:
-        """Pause playback."""
+    async def pause(self, player_id: Optional[str] = None) -> bool:
+        """Pause playback on the active queue or supplied MA player."""
         if not await _ensure_connected_nonblocking():
             return False
         
         try:
-            queue_id = _current_queue_id or _current_player_id
+            queue_id = await self._get_control_queue_id(player_id)
             if not queue_id:
                 return False
             
@@ -645,13 +651,13 @@ class MusicAssistantSource(BaseMetadataSource):
             logger.debug(f"Music Assistant pause failed: {e}")
             return False
     
-    async def next_track(self) -> bool:
-        """Skip to next track."""
+    async def next_track(self, player_id: Optional[str] = None) -> bool:
+        """Skip to next track on the active queue or supplied MA player."""
         if not await _ensure_connected_nonblocking():
             return False
         
         try:
-            queue_id = _current_queue_id or _current_player_id
+            queue_id = await self._get_control_queue_id(player_id)
             if not queue_id:
                 return False
             
@@ -661,13 +667,13 @@ class MusicAssistantSource(BaseMetadataSource):
             logger.debug(f"Music Assistant next_track failed: {e}")
             return False
     
-    async def previous_track(self) -> bool:
-        """Skip to previous track."""
+    async def previous_track(self, player_id: Optional[str] = None) -> bool:
+        """Skip to previous track on the active queue or supplied MA player."""
         if not await _ensure_connected_nonblocking():
             return False
         
         try:
-            queue_id = _current_queue_id or _current_player_id
+            queue_id = await self._get_control_queue_id(player_id)
             if not queue_id:
                 return False
             
@@ -677,13 +683,13 @@ class MusicAssistantSource(BaseMetadataSource):
             logger.debug(f"Music Assistant previous_track failed: {e}")
             return False
     
-    async def seek(self, position_ms: int) -> bool:
-        """Seek to position in milliseconds."""
+    async def seek(self, position_ms: int, player_id: Optional[str] = None) -> bool:
+        """Seek to position in milliseconds on active queue or supplied MA player."""
         if not await _ensure_connected_nonblocking():
             return False
         
         try:
-            queue_id = _current_queue_id or _current_player_id
+            queue_id = await self._get_control_queue_id(player_id)
             if not queue_id:
                 return False
             
