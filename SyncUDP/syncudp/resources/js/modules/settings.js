@@ -192,7 +192,6 @@ export function applyDisplayConfig(updateBackgroundFn = null) {
     const visualModeToggle = document.getElementById('btn-lyrics-toggle');
     const wordSyncToggle = document.getElementById('btn-word-sync-toggle');
     const slideshowToggle = document.getElementById('btn-slideshow-toggle');
-    const mediaBrowserToggle = document.getElementById('btn-media-browser');
     const showToggles = displayConfig.showVisualModeToggle;
     
     if (visualModeToggle) {
@@ -203,9 +202,6 @@ export function applyDisplayConfig(updateBackgroundFn = null) {
     }
     if (slideshowToggle) {
         slideshowToggle.style.display = showToggles ? 'flex' : 'none';
-    }
-    if (mediaBrowserToggle) {
-        mediaBrowserToggle.style.display = showToggles ? 'flex' : 'none';
     }
 
     // Track info visibility (independent of album art)

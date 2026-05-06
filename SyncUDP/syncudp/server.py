@@ -1982,11 +1982,45 @@ async def get_cover_art():
     
     return "", 404
 
+def _resolve_ma_player_id_from_request() -> Optional[str]:
+    """Map the frontend ``?player=<name>`` query param to a Music Assistant
+    player_id via the multi-instance player registry.
+
+    The web UI lets users pin a specific RTP player (top-right pill); the
+    transport buttons should then drive whatever Music Assistant device that
+    player is linked to instead of the globally-active queue. Returns ``None``
+    when no player is selected or no MA link is configured.
+    """
+    player_name = (request.args.get('player') or '').strip()
+    if not player_name:
+        return None
+    try:
+        from audio_recognition.player_registry import get_registry
+        cfg = get_registry().get(player_name)
+    except Exception:
+        return None
+    if cfg and cfg.music_assistant_player_id:
+        return cfg.music_assistant_player_id
+    return None
+
+
 async def _music_assistant_source_for_controls():
+    """Build a MusicAssistantSource scoped to the request's selected player.
+
+    Priority for which MA queue the controls drive:
+      1. Player selected in the UI (``?player=<name>``) and linked to an MA
+         player in the registry — controls always target that device.
+      2. Whichever source is currently producing metadata, if it is MA.
+    """
+    from system_utils.sources.music_assistant import MusicAssistantSource, is_configured
+    target_ma_id = _resolve_ma_player_id_from_request()
+    if target_ma_id:
+        if not is_configured():
+            return None
+        return MusicAssistantSource(target_player_id=target_ma_id)
     metadata = await get_current_song_meta_data()
     if not metadata or metadata.get('source') != 'music_assistant':
         return None
-    from system_utils.sources.music_assistant import MusicAssistantSource
     return MusicAssistantSource()
 
 
@@ -2148,14 +2182,11 @@ async def transfer_playback():
 
 @app.route("/api/playback/volume", methods=['GET'])
 async def get_volume():
-    """Return Music Assistant volume only; local/Spotify volume controls are disabled."""
+    """Return Music Assistant volume for the selected/active player."""
     volumes = {}
     try:
-        metadata = await get_current_song_meta_data()
-        source = metadata.get('source') if metadata else None
-        if source == 'music_assistant':
-            from system_utils.sources.music_assistant import MusicAssistantSource
-            ma_source = MusicAssistantSource()
+        ma_source = await _music_assistant_source_for_controls()
+        if ma_source:
             volumes['music_assistant'] = await ma_source.get_volume()
     except Exception as e:
         logger.debug(f"Could not get MA volume: {e}")
@@ -2164,32 +2195,29 @@ async def get_volume():
 
 @app.route("/api/playback/volume", methods=['POST'])
 async def set_volume():
-    """Set volume for a specific source.
-    
+    """Set Music Assistant volume for the selected/active player.
+
     Body: {"source": "music_assistant", "volume": 0-100}
     """
     data = await request.get_json()
     source = data.get('source')
     volume = data.get('volume')
-    
-    if source not in ['music_assistant']:
+
+    if source != 'music_assistant':
         return jsonify({"error": "Invalid source"}), 400
-    
+
     if volume is None or not isinstance(volume, (int, float)):
         return jsonify({"error": "volume required (0-100)"}), 400
-    
+
     volume = int(max(0, min(100, volume)))
-    
-    if source == 'music_assistant':
-        try:
-            from system_utils.sources.music_assistant import MusicAssistantSource
-            ma_source = MusicAssistantSource()
-            success = await ma_source.set_volume(volume)
-            if success:
-                return jsonify({"status": "success", "source": "music_assistant", "volume": volume})
-            return jsonify({"error": "Failed to set MA volume"}), 500
-        except ImportError:
-            return jsonify({"error": "Music Assistant not available"}), 500
+
+    ma_source = await _music_assistant_source_for_controls()
+    if not ma_source:
+        return jsonify({"error": "Music Assistant not available"}), 410
+    success = await ma_source.set_volume(volume)
+    if success:
+        return jsonify({"status": "success", "source": "music_assistant", "volume": volume})
+    return jsonify({"error": "Failed to set MA volume"}), 500
 
 
 @app.route("/api/playback/shuffle", methods=['POST'])

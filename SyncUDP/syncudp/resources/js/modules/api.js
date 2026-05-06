@@ -648,7 +648,7 @@ export async function toggleInstrumentalMark(isInstrumental) {
  * @returns {Promise<Object>} Result
  */
 export async function playbackCommand(action) {
-    return apiFetch(`/api/playback/${action}`, { method: 'POST' });
+    return apiFetch(withPlayerScope(`/api/playback/${action}`), { method: 'POST' });
 }
 
 /**
@@ -658,7 +658,7 @@ export async function playbackCommand(action) {
  * @returns {Promise<Object>} Result
  */
 export async function seekToPosition(positionMs) {
-    return postJson('/api/playback/seek', { position_ms: positionMs });
+    return postJson(withPlayerScope('/api/playback/seek'), { position_ms: positionMs });
 }
 
 // ========== QUEUE ==========
@@ -669,7 +669,7 @@ export async function seekToPosition(positionMs) {
  * @returns {Promise<Object>} Queue data
  */
 export async function fetchQueue() {
-    return apiFetch('/api/playback/queue');
+    return apiFetch(withPlayerScope('/api/playback/queue'));
 }
 
 // ========== LIKE ==========
@@ -686,7 +686,7 @@ export async function checkLikedStatus(trackId, source = '') {
     if (source) {
         url += `&source=${encodeURIComponent(source)}`;
     }
-    return apiFetch(url);
+    return apiFetch(withPlayerScope(url));
 }
 
 /**
@@ -698,7 +698,7 @@ export async function checkLikedStatus(trackId, source = '') {
  * @returns {Promise<Object>} Result
  */
 export async function toggleLikeStatus(trackId, action, source = '') {
-    return postJson('/api/playback/liked', { track_id: trackId, action, source });
+    return postJson(withPlayerScope('/api/playback/liked'), { track_id: trackId, action, source });
 }
 
 // ========== SLIDESHOW ==========
@@ -802,90 +802,25 @@ export async function stopAudioRecognition() {
     return postJson('/api/audio-recognition/stop', {});
 }
 
-// ========== DEVICE & PLAYBACK CONTROLS ==========
+// ========== VOLUME ==========
 
 /**
- * Get list of available Spotify devices (Spotify-specific)
- * 
- * @returns {Promise<Object>} Device list {devices: [...]}
- */
-export async function getSpotifyDevices() {
-    return apiFetch('/api/spotify/devices');
-}
-
-/**
- * Get list of available devices for current source (auto-detects source)
- * 
- * @param {string} [forceSource] - Optional. Force 'spotify' or 'music_assistant'
- * @returns {Promise<Object>} Device list {devices: [...], source: 'spotify'|'music_assistant'}
- */
-export async function getDevices(forceSource = null) {
-    const url = forceSource 
-        ? `/api/playback/devices?source=${encodeURIComponent(forceSource)}`
-        : '/api/playback/devices';
-    return apiFetch(url);
-}
-
-/**
- * Transfer Spotify playback to a specific device (Spotify-specific)
- * 
- * @param {string} deviceId - Target device ID
- * @param {boolean} forcePlay - Whether to start playback immediately
- * @returns {Promise<Object>} Result
- */
-export async function transferSpotifyPlayback(deviceId, forcePlay = true) {
-    return postJson('/api/spotify/transfer', { device_id: deviceId, force_play: forcePlay });
-}
-
-/**
- * Transfer playback to a specific device (auto-detects source)
- * 
- * @param {string} deviceId - Target device ID
- * @param {boolean} forcePlay - Whether to start playback immediately (Spotify only)
- * @returns {Promise<Object>} Result with source info
- */
-export async function transferPlayback(deviceId, forcePlay = true) {
-    return postJson('/api/playback/transfer', { device_id: deviceId, force_play: forcePlay });
-}
-
-/**
- * Get volume levels for all available sources
- * 
- * @returns {Promise<Object>} Volume levels {windows: number, spotify: number, music_assistant: number}
+ * Get the Music Assistant volume for the UI-selected player.
+ *
+ * @returns {Promise<Object>} Volume payload `{music_assistant: number}` (or
+ *   empty object when unavailable).
  */
 export async function getVolume() {
-    return apiFetch('/api/playback/volume');
+    return apiFetch(withPlayerScope('/api/playback/volume'));
 }
 
 /**
- * Set volume for a specific source
- * 
- * @param {string} source - 'windows', 'spotify', or 'music_assistant'
- * @param {number} volume - Volume level (0-100)
- * @returns {Promise<Object>} Result
+ * Set the Music Assistant volume for the UI-selected player.
+ *
+ * @param {string} source - Always `'music_assistant'` in this build.
+ * @param {number} volume - 0-100.
+ * @returns {Promise<Object>} Result.
  */
 export async function setVolume(source, volume) {
-    return postJson('/api/playback/volume', { source, volume });
-}
-
-/**
- * Toggle or set shuffle mode
- * 
- * @param {boolean|null} state - true/false to set, null to toggle
- * @returns {Promise<Object>} Result with new shuffle state
- */
-export async function setShuffle(state = null) {
-    const body = state !== null ? { state } : {};
-    return postJson('/api/playback/shuffle', body);
-}
-
-/**
- * Set or cycle repeat mode
- * 
- * @param {string|null} mode - 'off', 'context', 'track', or null to cycle
- * @returns {Promise<Object>} Result with new repeat mode
- */
-export async function setRepeat(mode = null) {
-    const body = mode !== null ? { mode } : {};
-    return postJson('/api/playback/repeat', body);
+    return postJson(withPlayerScope('/api/playback/volume'), { source, volume });
 }

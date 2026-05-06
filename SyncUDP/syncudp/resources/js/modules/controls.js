@@ -37,13 +37,8 @@ import {
     checkLikedStatus as apiCheckLikedStatus,
     toggleLikeStatus,
     seekToPosition,
-    getSpotifyDevices,
-    getDevices,
-    transferPlayback,
     getVolume,
-    setVolume as apiSetVolume,
-    setShuffle,
-    setRepeat
+    setVolume as apiSetVolume
 } from './api.js';
 
 // ========== SEEK STATE ==========
@@ -901,119 +896,9 @@ function handleSwipe(startX, startY, endX, endY) {
     }
 }
 
-// ========== CONTROLS MENU (Shuffle, Repeat, Devices) ==========
-
-let controlsMenuOpen = false;
-let volumePopupOpen = false;
-let deviceModalOpen = false;
-let currentShuffleState = false;
-let currentRepeatMode = 'off';  // 'off', 'context', 'track'
-
-/**
- * Setup controls menu (hamburger menu) interactions
- */
-export function setupControlsMenu() {
-    const menuBtn = document.getElementById('btn-menu');
-    const menu = document.getElementById('controls-menu');
-    const shuffleBtn = document.getElementById('btn-shuffle');
-    const repeatBtn = document.getElementById('btn-repeat');
-    const devicesBtn = document.getElementById('btn-devices');
-    
-    if (!menuBtn || !menu) return;
-    
-    // Toggle menu on button click
-    menuBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        toggleControlsMenu();
-    });
-    
-    // Shuffle button
-    if (shuffleBtn) {
-        shuffleBtn.addEventListener('click', async () => {
-            try {
-                const result = await setShuffle();
-                if (result.shuffle !== undefined) {
-                    currentShuffleState = result.shuffle;
-                    updateShuffleButton();
-                    showToast(currentShuffleState ? 'Shuffle On' : 'Shuffle Off', 'success', 1000);
-                }
-            } catch (e) {
-                showToast('Shuffle failed', 'error');
-            }
-        });
-    }
-    
-    // Repeat button
-    if (repeatBtn) {
-        repeatBtn.addEventListener('click', async () => {
-            try {
-                const result = await setRepeat();
-                if (result.repeat !== undefined) {
-                    currentRepeatMode = result.repeat;
-                    updateRepeatButton();
-                    const modeText = { off: 'Off', context: 'All', track: 'One' };
-                    showToast(`Repeat: ${modeText[currentRepeatMode] || currentRepeatMode}`, 'success', 1000);
-                }
-            } catch (e) {
-                showToast('Repeat failed', 'error');
-            }
-        });
-    }
-    
-    // Devices button
-    if (devicesBtn) {
-        devicesBtn.addEventListener('click', () => {
-            toggleControlsMenu(false);
-            openDevicePickerModal();
-        });
-    }
-    
-    // Close menu on outside click
-    document.addEventListener('click', (e) => {
-        if (controlsMenuOpen && !menu.contains(e.target) && e.target !== menuBtn) {
-            toggleControlsMenu(false);
-        }
-    });
-}
-
-/**
- * Toggle controls menu visibility
- */
-function toggleControlsMenu(forceState = null) {
-    const menu = document.getElementById('controls-menu');
-    if (!menu) return;
-    
-    controlsMenuOpen = forceState !== null ? forceState : !controlsMenuOpen;
-    menu.classList.toggle('hidden', !controlsMenuOpen);
-}
-
-/**
- * Update shuffle button state
- */
-function updateShuffleButton() {
-    const btn = document.getElementById('btn-shuffle');
-    if (btn) {
-        btn.classList.toggle('active', currentShuffleState);
-    }
-}
-
-/**
- * Update repeat button state and icon
- */
-function updateRepeatButton() {
-    const btn = document.getElementById('btn-repeat');
-    if (!btn) return;
-    
-    const icon = btn.querySelector('i');
-    btn.classList.toggle('active', currentRepeatMode !== 'off');
-    
-    if (icon) {
-        // Change icon for repeat one
-        icon.className = currentRepeatMode === 'track' ? 'bi bi-repeat-1' : 'bi bi-repeat';
-    }
-}
-
 // ========== VOLUME POPUP ==========
+
+let volumePopupOpen = false;
 
 /**
  * Setup volume popup interactions
@@ -1070,48 +955,23 @@ function toggleVolumePopup(forceState = null) {
 }
 
 /**
- * Refresh volume sliders with current values
+ * Refresh volume slider with current Music Assistant value for the
+ * UI-selected player.
  */
 async function refreshVolumeSliders() {
     try {
         const volumes = await getVolume();
-        
-        // Windows volume (only show if we got a valid number, not null)
-        const winRow = document.getElementById('volume-windows');
-        if (winRow) {
-            if (volumes.windows !== undefined && volumes.windows !== null) {
-                winRow.style.display = 'flex';
-                const slider = winRow.querySelector('.volume-slider');
-                const value = winRow.querySelector('.volume-value');
-                if (slider) slider.value = volumes.windows;
-                if (value) value.textContent = `${volumes.windows}%`;
-            } else {
-                winRow.style.display = 'none';
-            }
-        }
-        
-        // Spotify volume
-        if (volumes.spotify !== undefined && volumes.spotify !== null) {
-            const row = document.getElementById('volume-spotify');
-            if (row) {
-                row.style.display = 'flex';
-                const slider = row.querySelector('.volume-slider');
-                const value = row.querySelector('.volume-value');
-                if (slider) slider.value = volumes.spotify;
-                if (value) value.textContent = `${volumes.spotify}%`;
-            }
-        }
-        
-        // Music Assistant volume
+        const row = document.getElementById('volume-ma');
+        if (!row) return;
+
         if (volumes.music_assistant !== undefined && volumes.music_assistant !== null) {
-            const row = document.getElementById('volume-ma');
-            if (row) {
-                row.style.display = 'flex';
-                const slider = row.querySelector('.volume-slider');
-                const value = row.querySelector('.volume-value');
-                if (slider) slider.value = volumes.music_assistant;
-                if (value) value.textContent = `${volumes.music_assistant}%`;
-            }
+            row.style.display = 'flex';
+            const slider = row.querySelector('.volume-slider');
+            const value = row.querySelector('.volume-value');
+            if (slider) slider.value = volumes.music_assistant;
+            if (value) value.textContent = `${volumes.music_assistant}%`;
+        } else {
+            row.style.display = 'none';
         }
     } catch (e) {
         console.error('Failed to fetch volume:', e);
@@ -1133,149 +993,3 @@ function debouncedSetVolume(source, volume) {
     }, VOLUME_DEBOUNCE_MS);
 }
 
-// ========== DEVICE PICKER MODAL ==========
-
-/**
- * Open device picker modal and load devices
- * @param {string} [forceSource] - Optional. Force 'spotify' or 'music_assistant'
- */
-export async function openDevicePickerModal(forceSource = null) {
-    const modal = document.getElementById('device-picker-modal');
-    const closeBtn = document.getElementById('device-close');
-    const refreshBtn = document.getElementById('device-refresh');
-    
-    if (!modal) return;
-    
-    deviceModalOpen = true;
-    modal.classList.remove('hidden');
-    
-    // Store forced source for refresh button
-    modal.dataset.forceSource = forceSource || '';
-    
-    // Load devices
-    await loadDevices(forceSource);
-    
-    // Close button
-    if (closeBtn) {
-        closeBtn.onclick = () => closeDevicePickerModal();
-    }
-    
-    // Refresh button
-    if (refreshBtn) {
-        refreshBtn.onclick = async () => {
-            refreshBtn.classList.add('spinning');
-            const savedSource = modal.dataset.forceSource || null;
-            await loadDevices(savedSource);
-            refreshBtn.classList.remove('spinning');
-        };
-    }
-    
-    // Close on backdrop click
-    modal.addEventListener('click', (e) => {
-        if (e.target === modal) {
-            closeDevicePickerModal();
-        }
-    });
-}
-
-/**
- * Close device picker modal
- */
-function closeDevicePickerModal() {
-    const modal = document.getElementById('device-picker-modal');
-    if (modal) {
-        modal.classList.add('hidden');
-        deviceModalOpen = false;
-    }
-}
-
-/**
- * Load devices into the device list
- * @param {string} [forceSource] - Optional. Force 'spotify' or 'music_assistant'
- */
-async function loadDevices(forceSource = null) {
-    const list = document.getElementById('device-list');
-    if (!list) return;
-    
-    list.innerHTML = '<div class="device-loading">Loading devices...</div>';
-    
-    try {
-        const result = await getDevices(forceSource);
-        const devices = result.devices || [];
-        const source = result.source || 'spotify';
-        
-        if (devices.length === 0) {
-            const emptyMsg = source === 'music_assistant' 
-                ? 'No players found in Music Assistant.'
-                : 'No devices found. Open Spotify on a device to see it here.';
-            list.innerHTML = `<div class="device-empty">${emptyMsg}</div>`;
-            return;
-        }
-        
-        list.innerHTML = '';
-        devices.forEach(device => {
-            const item = document.createElement('div');
-            item.className = `device-item ${device.is_active ? 'active' : ''}`;
-            
-            // Device type icon
-            const icons = {
-                'Computer': 'bi-laptop',
-                'Smartphone': 'bi-phone',
-                'Speaker': 'bi-speaker',
-                'TV': 'bi-tv',
-                'CastVideo': 'bi-chromecast',
-                'default': 'bi-speaker'
-            };
-            const iconClass = icons[device.type] || icons.default;
-            
-            item.innerHTML = `
-                <i class="bi ${iconClass} device-icon"></i>
-                <div class="device-info">
-                    <div class="device-name">${device.name}</div>
-                    <div class="device-type">${device.type}${device.is_active ? ' • Active' : ''}</div>
-                </div>
-            `;
-            
-            item.addEventListener('click', async () => {
-                if (device.is_active) return;
-                
-                try {
-                    item.classList.add('loading');
-                    const result = await transferPlayback(device.id);
-                    if (result.status === 'success') {
-                        showToast(`Switched to ${device.name}`, 'success');
-                        closeDevicePickerModal();
-                    } else {
-                        throw new Error(result.error || 'Transfer failed');
-                    }
-                } catch (e) {
-                    showToast(`Failed: ${e.message}`, 'error');
-                    item.classList.remove('loading');
-                }
-            });
-            
-            list.appendChild(item);
-        });
-    } catch (e) {
-        list.innerHTML = '<div class="device-error">Failed to load devices</div>';
-        console.error('Failed to load devices:', e);
-    }
-}
-
-/**
- * Update shuffle/repeat state from track info
- * Call this from main.js when track info is updated
- */
-export function updatePlaybackState(trackInfo) {
-    if (!trackInfo) return;
-    
-    if (trackInfo.shuffle_state !== undefined) {
-        currentShuffleState = trackInfo.shuffle_state;
-        updateShuffleButton();
-    }
-    
-    if (trackInfo.repeat_state !== undefined) {
-        currentRepeatMode = trackInfo.repeat_state;
-        updateRepeatButton();
-    }
-}

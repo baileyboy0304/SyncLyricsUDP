@@ -298,11 +298,6 @@
     </button>
 </div>
 
-<!-- NEW: Media Browser Button (2nd row above visual mode toggle) -->
-<button id="btn-media-browser" class="media-browser-toggle-btn" title="Music Assistant Browser">
-    <span class="icon-ma"></span>
-</button>
-
 <!-- NEW: Discreet Lyric/Visual Mode Toggle (Bottom Left) -->
 <button id="btn-lyrics-toggle" class="lyrics-toggle-btn" title="Toggle Visual Mode">
     <i class="bi bi-music-note"></i>
@@ -414,41 +409,6 @@
         <!-- Image Grid -->
         <div id="slideshow-image-grid" class="slideshow-image-grid">
             <!-- Populated dynamically -->
-        </div>
-    </div>
-</div>
-
-<!-- Media Browser Modal (click backdrop to close) -->
-<div id="media-browser-modal" class="media-browser-modal hidden">
-    <div class="media-browser-content">
-        <!-- Minimalist controls overlay -->
-        <div class="media-browser-controls">
-            <button id="media-browser-devices" class="media-browser-control-btn" title="Select Device">
-                <i class="bi bi-speaker"></i>
-            </button>
-            <button id="media-browser-refresh" class="media-browser-control-btn" title="Refresh">
-                <i class="bi bi-arrow-clockwise"></i>
-            </button>
-            <button id="media-browser-close" class="media-browser-control-btn close-btn" title="Close">
-                <i class="bi bi-x-lg"></i>
-            </button>
-        </div>
-        <iframe id="media-browser-frame" class="media-browser-frame" src="" allow="autoplay"></iframe>
-    </div>
-</div>
-
-<!-- Device Picker Modal (outside player-ui-container for proper z-index) -->
-<div id="device-picker-modal" class="device-picker-modal hidden">
-    <div class="device-picker-content">
-        <div class="device-picker-header">
-            <h3>📱 Select Device</h3>
-            <div class="device-picker-actions">
-                <button id="device-refresh" class="device-action-btn" title="Refresh devices"><i class="bi bi-arrow-clockwise"></i></button>
-                <button id="device-close" class="device-action-btn" title="Close">×</button>
-            </div>
-        </div>
-        <div id="device-list" class="device-list">
-            <div class="device-loading">Loading devices...</div>
         </div>
     </div>
 </div>
@@ -589,10 +549,9 @@
 
     <!-- Playback Controls -->
     <div id="playback-controls" class="playback-controls">
-        <!-- Left: Like Button + Menu -->
+        <!-- Left: Like Button -->
         <div class="controls-left">
             <button id="btn-like" class="control-btn" title="Save to Liked Songs"><i class="bi bi-heart"></i></button>
-            <button id="btn-menu" class="control-btn" title="More Controls"><i class="bi bi-three-dots"></i></button>
         </div>
 
         <!-- Center: Main Playback -->
@@ -607,22 +566,6 @@
             <button id="btn-volume" class="control-btn" title="Volume"><i class="bi bi-volume-up-fill"></i></button>
             <button id="btn-queue" class="control-btn" title="Show Queue"><i class="bi bi-music-note-list"></i></button>
         </div>
-    </div>
-
-    <!-- Controls Menu Popup (Shuffle, Repeat, Devices) -->
-    <div id="controls-menu" class="controls-menu hidden">
-        <button id="btn-shuffle" class="menu-btn" title="Shuffle">
-            <i class="bi bi-shuffle"></i>
-            <span>Shuffle</span>
-        </button>
-        <button id="btn-repeat" class="menu-btn" title="Repeat">
-            <i class="bi bi-repeat"></i>
-            <span>Repeat</span>
-        </button>
-        <button id="btn-devices" class="menu-btn" title="Devices">
-            <i class="bi bi-speaker"></i>
-            <span>Devices</span>
-        </button>
     </div>
 
     <!-- Volume Popup (Horizontal Sliders) -->

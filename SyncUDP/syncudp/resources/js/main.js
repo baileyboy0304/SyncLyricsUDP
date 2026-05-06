@@ -65,9 +65,7 @@ import {
     setupTouchControls,
     attachProgressBarSeek,
     toggleArtOnlyMode,
-    setupControlsMenu,
-    setupVolumePopup,
-    updatePlaybackState
+    setupVolumePopup
 } from './modules/controls.js';
 
 // Background (Level 2)
@@ -127,9 +125,6 @@ import { initTouchGestures } from './modules/touchGestures.js';
 
 // Keyboard Shortcuts (Level 3)
 import { initKeyboardShortcuts } from './modules/keyboard.js';
-
-// Media Browser (Level 2)
-import { setupMediaBrowser, updateMediaBrowserIcon } from './modules/mediabrowser.js';
 
 // ========== CONNECT MODULES ==========
 
@@ -632,14 +627,6 @@ async function updateLoop() {
         // Update track info (must happen before icon update)
         setLastTrackInfo(trackInfo);
         
-        // Update shuffle/repeat button states from track info
-        updatePlaybackState(trackInfo);
-        
-        // Update media browser button icon AFTER track info is set
-        if (sourceChanged) {
-            updateMediaBrowserIcon();
-        }
-
         // Apply background style with priority: Saved Preference > URL Params > Default
         // Only apply saved style if user has opted-in to art background via URL or settings
         const hasArtBgEnabled = displayConfig.artBackground || displayConfig.softAlbumArt || displayConfig.sharpAlbumArt;
@@ -755,7 +742,6 @@ async function main() {
     initWordSyncStyle();  // Initialize word-sync style from localStorage
     setupQueueInteractions();
     setupTouchControls();
-    setupControlsMenu();      // Hamburger menu (shuffle, repeat, devices)
     setupVolumePopup();       // Volume control popup
 
     // Initialize multi-finger touch gestures (3-finger tap for play/pause)
@@ -772,9 +758,6 @@ async function main() {
 
     // Initialize audio source module
     audioSource.init();
-
-    // Initialize media browser
-    setupMediaBrowser();
 
     // Initialize waveform and spectrum visualizers
     initWaveform();
