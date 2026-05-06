@@ -345,7 +345,13 @@ async def _get_active_queue_id(player_id: str) -> Optional[str]:
         queue = await _client.player_queues.get_active_queue(player_id)
         if queue:
             _current_queue_id = queue.queue_id
+            logger.debug(
+                "Music Assistant active queue lookup: player_id=%r queue_id=%r",
+                player_id,
+                queue.queue_id,
+            )
             return queue.queue_id
+        logger.debug("Music Assistant active queue lookup: no active queue for player_id=%r", player_id)
     except Exception as e:
         # Rate limit queue error log
         global _last_queue_error_log
@@ -355,6 +361,7 @@ async def _get_active_queue_id(player_id: str) -> Optional[str]:
             _last_queue_error_log = now
     
     # Fallback: queue_id often equals player_id
+    logger.debug("Music Assistant active queue lookup: falling back to player_id as queue_id=%r", player_id)
     return player_id
 
 
@@ -595,17 +602,39 @@ class MusicAssistantSource(BaseMetadataSource):
             return None
     
     # === Playback Controls ===
-    
-    async def toggle_playback(self) -> bool:
-        """Toggle play/pause on the active queue."""
+
+    async def _get_control_queue_id(self, player_id: Optional[str] = None) -> Optional[str]:
+        """Return the queue to control, optionally scoped to a specific MA player."""
+        if player_id:
+            queue_id = await _get_active_queue_id(player_id)
+            logger.debug(
+                "Music Assistant control queue resolved: explicit_player_id=%r queue_id=%r",
+                player_id,
+                queue_id,
+            )
+            return queue_id
+        queue_id = _current_queue_id or _current_player_id
+        logger.debug(
+            "Music Assistant control queue resolved from current state: current_queue_id=%r current_player_id=%r queue_id=%r",
+            _current_queue_id,
+            _current_player_id,
+            queue_id,
+        )
+        return queue_id
+
+    async def toggle_playback(self, player_id: Optional[str] = None) -> bool:
+        """Toggle play/pause on the active queue or supplied MA player."""
         if not await _ensure_connected_nonblocking():
+            logger.debug("Music Assistant toggle_playback: not connected/ready for player_id=%r", player_id)
             return False
-        
+
         try:
-            queue_id = _current_queue_id or _current_player_id
+            queue_id = await self._get_control_queue_id(player_id)
             if not queue_id:
+                logger.debug("Music Assistant toggle_playback: no queue for player_id=%r", player_id)
                 return False
-            
+
+            logger.debug("Music Assistant toggle_playback: sending play_pause to queue_id=%r player_id=%r", queue_id, player_id)
             # Use the built-in play_pause() method which handles toggle
             await _client.player_queues.play_pause(queue_id)
             return True
@@ -613,80 +642,95 @@ class MusicAssistantSource(BaseMetadataSource):
             logger.debug(f"Music Assistant toggle_playback failed: {e}")
             return False
     
-    async def play(self) -> bool:
-        """Resume playback."""
+    async def play(self, player_id: Optional[str] = None) -> bool:
+        """Resume playback on the active queue or supplied MA player."""
         if not await _ensure_connected_nonblocking():
+            logger.debug("Music Assistant play: not connected/ready for player_id=%r", player_id)
             return False
-        
+
         try:
-            queue_id = _current_queue_id or _current_player_id
+            queue_id = await self._get_control_queue_id(player_id)
             if not queue_id:
+                logger.debug("Music Assistant play: no queue for player_id=%r", player_id)
                 return False
-            
+
+            logger.debug("Music Assistant play: sending play to queue_id=%r player_id=%r", queue_id, player_id)
             await _client.player_queues.play(queue_id)
             return True
         except Exception as e:
             logger.debug(f"Music Assistant play failed: {e}")
             return False
     
-    async def pause(self) -> bool:
-        """Pause playback."""
+    async def pause(self, player_id: Optional[str] = None) -> bool:
+        """Pause playback on the active queue or supplied MA player."""
         if not await _ensure_connected_nonblocking():
+            logger.debug("Music Assistant pause: not connected/ready for player_id=%r", player_id)
             return False
-        
+
         try:
-            queue_id = _current_queue_id or _current_player_id
+            queue_id = await self._get_control_queue_id(player_id)
             if not queue_id:
+                logger.debug("Music Assistant pause: no queue for player_id=%r", player_id)
                 return False
-            
+
+            logger.debug("Music Assistant pause: sending pause to queue_id=%r player_id=%r", queue_id, player_id)
             await _client.player_queues.pause(queue_id)
             return True
         except Exception as e:
             logger.debug(f"Music Assistant pause failed: {e}")
             return False
     
-    async def next_track(self) -> bool:
-        """Skip to next track."""
+    async def next_track(self, player_id: Optional[str] = None) -> bool:
+        """Skip to next track on the active queue or supplied MA player."""
         if not await _ensure_connected_nonblocking():
+            logger.debug("Music Assistant next_track: not connected/ready for player_id=%r", player_id)
             return False
-        
+
         try:
-            queue_id = _current_queue_id or _current_player_id
+            queue_id = await self._get_control_queue_id(player_id)
             if not queue_id:
+                logger.debug("Music Assistant next_track: no queue for player_id=%r", player_id)
                 return False
-            
+
+            logger.debug("Music Assistant next_track: sending next to queue_id=%r player_id=%r", queue_id, player_id)
             await _client.player_queues.next(queue_id)
             return True
         except Exception as e:
             logger.debug(f"Music Assistant next_track failed: {e}")
             return False
     
-    async def previous_track(self) -> bool:
-        """Skip to previous track."""
+    async def previous_track(self, player_id: Optional[str] = None) -> bool:
+        """Skip to previous track on the active queue or supplied MA player."""
         if not await _ensure_connected_nonblocking():
+            logger.debug("Music Assistant previous_track: not connected/ready for player_id=%r", player_id)
             return False
-        
+
         try:
-            queue_id = _current_queue_id or _current_player_id
+            queue_id = await self._get_control_queue_id(player_id)
             if not queue_id:
+                logger.debug("Music Assistant previous_track: no queue for player_id=%r", player_id)
                 return False
-            
+
+            logger.debug("Music Assistant previous_track: sending previous to queue_id=%r player_id=%r", queue_id, player_id)
             await _client.player_queues.previous(queue_id)
             return True
         except Exception as e:
             logger.debug(f"Music Assistant previous_track failed: {e}")
             return False
     
-    async def seek(self, position_ms: int) -> bool:
-        """Seek to position in milliseconds."""
+    async def seek(self, position_ms: int, player_id: Optional[str] = None) -> bool:
+        """Seek to position in milliseconds on active queue or supplied MA player."""
         if not await _ensure_connected_nonblocking():
+            logger.debug("Music Assistant seek: not connected/ready for player_id=%r", player_id)
             return False
-        
+
         try:
-            queue_id = _current_queue_id or _current_player_id
+            queue_id = await self._get_control_queue_id(player_id)
             if not queue_id:
+                logger.debug("Music Assistant seek: no queue for player_id=%r position_ms=%r", player_id, position_ms)
                 return False
-            
+
+            logger.debug("Music Assistant seek: sending seek to queue_id=%r player_id=%r position_ms=%r", queue_id, player_id, position_ms)
             # MA seek expects seconds
             position_seconds = position_ms // 1000
             await _client.player_queues.seek(queue_id, position_seconds)
