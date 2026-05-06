@@ -1998,20 +1998,33 @@ async def get_cover_art():
     
     return "", 404
 
+def _norm_player_label(value: str) -> str:
+    """Lowercase + strip non-alphanumerics so we can match player labels
+    even when one side uses spaces, the other underscores, etc."""
+    return ''.join(ch.lower() for ch in (value or '') if ch.isalnum())
+
+
 async def _resolve_ma_player_id_for_request() -> Optional[str]:
-    """Resolve the ``?player=<name>`` query param to a concrete MA player_id.
+    """Resolve ``?player=<name>`` to a concrete MA ``player_id``.
 
-    The web UI pins an RTP player in the top-right pill; transport must
-    drive *that* player. Resolution order, no guards:
+    The pinned RTP player IS a Music Assistant player, so we go look it
+    up in MA's player list. Resolution path:
 
-      1. ``music_assistant_player_id`` recorded against the player in the
-         multi-instance registry (set when the user links an MA player via
-         the rename UI).
-      2. A MA player whose ``player_id``, ``display_name`` or ``name``
-         matches the pinned name (covers the common case where the RTP
-         player and the MA player share a name and no manual link exists).
-      3. The pinned name itself, passed straight through. MA will reject
-         it if invalid; the caller surfaces that as an error toast.
+      1. Registry mapping — ``music_assistant_player_id`` linked via the
+         UI rename, if present. Authoritative when set.
+      2. Candidate-name search against ``_client.players``: build a list
+         of plausible names (the URL param itself plus the registry's
+         ``display_name`` / ``ma_display_name`` / ``name`` if known).
+         For each candidate we try, in order:
+           a. Direct ``_client.players.get(candidate)`` (some MA players
+              use the human label as their id).
+           b. Exact match on ``player_id`` / ``display_name`` / ``name``.
+           c. Normalised (case + punctuation insensitive) match — the
+              same speaker can be ``test_lyrics_player`` on the RTP side
+              and ``Test Lyrics Player`` in MA.
+      3. If everything above fails we still hand back the raw name so MA
+         (and the route handler's error toast) describe the failure
+         instead of falling silently to a different player.
 
     Returns ``None`` only when the URL did not include a ``?player=``.
     """
@@ -2019,26 +2032,46 @@ async def _resolve_ma_player_id_for_request() -> Optional[str]:
     if not player_name:
         return None
 
+    registry_cfg = None
     try:
         from audio_recognition.player_registry import get_registry
-        cfg = get_registry().get(player_name)
-        if cfg and cfg.music_assistant_player_id:
-            return cfg.music_assistant_player_id
+        registry_cfg = get_registry().get(player_name)
+        if registry_cfg and registry_cfg.music_assistant_player_id:
+            return registry_cfg.music_assistant_player_id
     except Exception as exc:
         logger.debug(f"Player registry lookup failed for {player_name!r}: {exc}")
+
+    candidates: List[str] = [player_name]
+    if registry_cfg is not None:
+        for extra in (registry_cfg.display_name, registry_cfg.ma_display_name, registry_cfg.name):
+            if extra and extra not in candidates:
+                candidates.append(extra)
 
     try:
         from system_utils.sources import music_assistant as ma_module
         if await ma_module._ensure_connected_nonblocking() and ma_module._client:
+            for cand in candidates:
+                direct = ma_module._client.players.get(cand)
+                if direct is not None:
+                    return getattr(direct, 'player_id', cand) or cand
+
+            cand_norm = {_norm_player_label(c) for c in candidates if c}
+            normalised_match: Optional[str] = None
             for player in ma_module._client.players.players:
                 pid = getattr(player, 'player_id', '') or ''
-                names = {
-                    pid,
-                    getattr(player, 'display_name', '') or '',
-                    getattr(player, 'name', '') or '',
-                }
-                if player_name in names:
+                labels = [pid,
+                          getattr(player, 'display_name', '') or '',
+                          getattr(player, 'name', '') or '']
+                if any(label in candidates for label in labels if label):
                     return pid
+                if any(_norm_player_label(label) in cand_norm for label in labels if label):
+                    normalised_match = normalised_match or pid
+            if normalised_match:
+                return normalised_match
+            logger.info(
+                f"No Music Assistant player matched pinned name {player_name!r}; "
+                f"candidates tried: {candidates!r}"
+            )
     except Exception as exc:
         logger.debug(f"MA name lookup failed for {player_name!r}: {exc}")
 

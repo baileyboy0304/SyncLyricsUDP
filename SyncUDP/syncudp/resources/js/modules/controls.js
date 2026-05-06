@@ -120,10 +120,22 @@ export function attachControlHandlers(enterVisualModeFn = null, exitVisualModeFn
     const playPauseBtn = document.getElementById('btn-play-pause');
     const nextBtn = document.getElementById('btn-next');
 
+    // apiFetch swallows non-2xx into a `{status:'error', message}` object,
+    // so explicitly surface server-side failures here as a toast instead
+    // of letting the click silently no-op.
+    const reportFailure = (result, fallbackMsg) => {
+        if (result && (result.error || result.status === 'error')) {
+            showToast(result.error || result.message || fallbackMsg, 'error');
+            return true;
+        }
+        return false;
+    };
+
     if (prevBtn) {
         prevBtn.addEventListener('click', async () => {
             try {
-                await playbackCommand('previous');
+                const result = await playbackCommand('previous');
+                reportFailure(result, 'Failed to skip previous');
             } catch (error) {
                 console.error('Previous track error:', error);
                 showToast('Failed to skip previous', 'error');
@@ -134,8 +146,8 @@ export function attachControlHandlers(enterVisualModeFn = null, exitVisualModeFn
     if (playPauseBtn) {
         playPauseBtn.addEventListener('click', async () => {
             try {
-                await playbackCommand('play-pause');
-                // Force immediate update of track info
+                const result = await playbackCommand('play-pause');
+                if (reportFailure(result, 'Failed to toggle playback')) return;
                 setTimeout(async () => {
                     const trackInfo = await getCurrentTrack();
                     if (trackInfo && !trackInfo.error) {
@@ -152,7 +164,8 @@ export function attachControlHandlers(enterVisualModeFn = null, exitVisualModeFn
     if (nextBtn) {
         nextBtn.addEventListener('click', async () => {
             try {
-                await playbackCommand('next');
+                const result = await playbackCommand('next');
+                reportFailure(result, 'Failed to skip next');
             } catch (error) {
                 console.error('Next track error:', error);
                 showToast('Failed to skip next', 'error');
