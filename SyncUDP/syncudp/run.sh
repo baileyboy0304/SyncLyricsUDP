@@ -1,5 +1,5 @@
 #!/bin/bash
-# SyncLyrics (UDP) - Home Assistant Addon Entrypoint
+# SyncLyrics (UDP Only) - Home Assistant Addon Entrypoint
 # Reads options from /data/options.json and maps them to environment variables.
 
 set -e
@@ -12,7 +12,7 @@ if [ ! -f "$OPTIONS_FILE" ]; then
 fi
 
 echo "============================================"
-echo "  SyncLyrics (UDP) - HA Addon Starting"
+echo "  SyncLyrics (UDP Only) - HA Addon Starting"
 echo "============================================"
 
 # Read options from HA config

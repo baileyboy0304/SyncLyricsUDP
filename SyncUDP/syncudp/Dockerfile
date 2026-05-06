@@ -1,4 +1,4 @@
-# SyncLyrics (UDP) - Home Assistant Addon Dockerfile
+# SyncLyrics (UDP Only) - Home Assistant Addon Dockerfile
 # Reads config from /data/options.json via run.sh
 
 FROM python:3.12-slim-bookworm AS builder

@@ -1,4 +1,4 @@
-name: "SyncLyrics (UDP)"
+name: "SyncLyrics (UDP Only)"
 version: "0.0.1"
 slug: synclyrics_udp
 description: "Real-time synchronized lyrics. UDP audio input variant."

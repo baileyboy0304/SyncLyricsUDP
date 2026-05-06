@@ -8,7 +8,7 @@ inside the add-on container.
 ## Installation
 
 1. Add this repository as a local Home Assistant add-on repository.
-2. Install the **SyncLyrics (UDP)** add-on.
+2. Install the **SyncLyrics (UDP Only)** add-on.
 3. Configure the add-on options, including Spotify and optional metadata API
    credentials if you use those integrations.
 4. Start the add-on and open `http://<home-assistant-host>:9012`.
