@@ -281,15 +281,11 @@ export function updateControlState(trackInfo) {
     const playPauseBtn = document.getElementById('btn-play-pause');
     const nextBtn = document.getElementById('btn-next');
 
-    // Enable controls for Spotify, Spotify Hybrid, Spicetify, Windows Media, or plugin sources
-    // Note: Audio Recognition source does not support playback controls
-    const canControl =
-        trackInfo.source === 'spotify' ||
-        trackInfo.source === 'spotify_hybrid' ||
-        trackInfo.source === 'spicetify' ||
-        trackInfo.source === 'windows_media' ||
-        trackInfo.source === 'music_assistant' ||
-        trackInfo.source === 'linux';
+    // UDP-only build: transport always drives the Music Assistant player
+    // linked to the selected RTP player (or the active MA player when none
+    // is pinned). The metadata source itself is `udp`/`audio_recognition`,
+    // so don't gate on that — let the server respond if MA isn't reachable.
+    const canControl = true;
 
     if (prevBtn) prevBtn.disabled = !canControl;
     if (nextBtn) nextBtn.disabled = !canControl;
