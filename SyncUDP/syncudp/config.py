@@ -136,11 +136,10 @@ RESOURCES_DIR = ROOT_DIR / "resources"
 DATABASE_DIR = Path(os.getenv("SYNCLYRICS_LYRICS_DB", str(DATA_DIR / "lyrics_database")))
 CACHE_DIR = Path(os.getenv("SYNCLYRICS_CACHE_DIR", str(DATA_DIR / "cache")))
 ALBUM_ART_DB_DIR = Path(os.getenv("SYNCLYRICS_ALBUM_ART_DB", str(DATA_DIR / "album_art_database")))
-SPICETIFY_DB_DIR = Path(os.getenv("SYNCLYRICS_SPICETIFY_DB", str(DATA_DIR / "spicetify_database")))  # Internal/deprecated cache path; not user-facing in UDP-only mode.
 CERTS_DIR = Path(os.getenv("SYNCLYRICS_CERTS_DIR", str(DATA_DIR / "certs")))
 
 # FIX: Wrap directory creation in try-except for permission errors
-for d in [RESOURCES_DIR, DATABASE_DIR, CACHE_DIR, ALBUM_ART_DB_DIR, SPICETIFY_DB_DIR, CERTS_DIR]:
+for d in [RESOURCES_DIR, DATABASE_DIR, CACHE_DIR, ALBUM_ART_DB_DIR, CERTS_DIR]:
     try:
         d.mkdir(parents=True, exist_ok=True)
     except (OSError, PermissionError) as e:
@@ -366,7 +365,6 @@ SYSTEM = {
     # input sources are disabled in the UDP-only add-on.
     "windows": {"media_session": {"enabled": False, "preferred": False, "timeout": 0}, "paused_timeout": 0},
     "spotify": {"paused_timeout": 0},
-    "spicetify": {"paused_timeout": 0},
     "linux": {"gsettings_enabled": False, "playerctl_required": False}
 }
 
@@ -381,7 +379,6 @@ FEATURES = {
     "album_art_db": _safe_bool(conf("features.album_art_db"), True),
     "word_sync_auto_switch": _safe_bool(conf("features.word_sync_auto_switch"), False),  # Respect provider priority
     "word_sync_default_enabled": _safe_bool(conf("features.word_sync_default_enabled"), True),  # Word-sync ON by default
-    "spicetify_database": False,  # Internal/deprecated; old Spicetify source is disabled
 }
 
 ALBUM_ART = {
