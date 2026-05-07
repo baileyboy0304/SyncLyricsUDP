@@ -105,14 +105,17 @@ def _get_connection_lock() -> asyncio.Lock:
 async def _connect() -> bool:
     """
     Connect to Music Assistant server.
-    
+
     Uses exponential backoff for reconnection attempts.
     Returns True if connected, False otherwise.
     """
     global _client, _connected, _listening, _last_connect_attempt, _reconnect_delay
     global _connection_attempt_count
-    
-    if _connected and _client and _listening:
+
+    # Only require WebSocket open (_connected + _client), not _listening.
+    # _listening is set asynchronously by the start_listening task and must
+    # not gate basic connectivity checks — doing so causes rate-limit loops.
+    if _connected and _client is not None:
         return True
     
     # Check if configured
@@ -228,9 +231,29 @@ async def _start_listening():
             _last_disconnect_log = now
 
 
+async def _wait_for_ready(timeout: float = 3.0) -> bool:
+    """Wait for MA to finish the start_listening handshake (non-blocking poll).
+
+    Useful after _ensure_connected() returns True but _listening is still
+    False because the listener task hasn't had a scheduling slot yet.
+    Returns True once is_ready(), or False after *timeout* seconds.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if is_ready():
+            return True
+        await asyncio.sleep(0.05)
+    return is_ready()
+
+
 async def _ensure_connected() -> bool:
-    """Ensure we're connected, attempt reconnection if needed (BLOCKING - legacy)."""
-    if _connected and _client and _listening:
+    """Ensure we're connected (WebSocket open), attempt reconnection if needed.
+
+    Only checks _connected + _client; does NOT require _listening.  The
+    _listening flag is set asynchronously inside _start_listening() and
+    must not block control commands that only need the open WebSocket.
+    """
+    if _connected and _client is not None:
         return True
     return await _connect()
 
@@ -735,22 +758,27 @@ class MusicAssistantSource(BaseMetadataSource):
             if not queue_id:
                 return None
             
-            # Get queue object to find current position
+            # Resolve current position to know where to start the upcoming queue.
+            # Prefer the in-memory cached queue (populated by start_listening events).
+            # If not cached yet, fall back to a direct get_active_queue() API call so
+            # the queue works immediately after connection (before full event sync).
             queue_obj = _client.player_queues.get(queue_id)
             if not queue_obj:
-                logger.debug("Music Assistant get_queue: queue_id=%r not present in client cache", queue_id)
+                logger.debug("Music Assistant get_queue: queue_id=%r not in client cache; querying API", queue_id)
+                try:
+                    queue_obj = await _client.player_queues.get_active_queue(queue_id)
+                except Exception:
+                    queue_obj = None
 
-            # Get current index - this is where we are in the queue
-            # MA queue includes history (played songs) at the beginning
-            # We want to start AFTER the current song to get only upcoming
-            current_index = getattr(queue_obj, 'current_index', 0) if queue_obj else 0
-            current_index = current_index or 0
-            
-            # Get items starting AFTER the current item
-            # offset = current_index + 1 skips history AND current song
+            current_index = getattr(queue_obj, 'current_index', None)
+            if current_index is None:
+                current_index = 0
+
+            # Get items starting AFTER the current item.
+            # offset = current_index + 1 skips history AND the currently playing song.
             items = await _client.player_queues.get_queue_items(
-                queue_id, 
-                limit=20, 
+                queue_id,
+                limit=20,
                 offset=current_index + 1
             )
             
