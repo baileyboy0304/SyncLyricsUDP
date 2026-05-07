@@ -811,6 +811,16 @@ export async function stopAudioRecognition() {
     return postJson('/api/audio-recognition/stop', {});
 }
 
+/**
+ * Play from a specific queue index (play-from-here)
+ *
+ * @param {number} queueIndex - Absolute queue index to jump to
+ * @returns {Promise<Object>} Result
+ */
+export async function playQueueItem(queueIndex) {
+    return postJson(withPlayerScope('/api/playback/queue/play-index'), { queue_index: queueIndex });
+}
+
 // ========== VOLUME ==========
 
 /**

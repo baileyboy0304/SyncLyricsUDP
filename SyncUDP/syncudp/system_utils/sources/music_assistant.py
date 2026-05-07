@@ -75,6 +75,19 @@ CACHE_TTL = 1.0  # Cache TTL in seconds (MA updates come via events)
 _auth_error: Optional[str] = None
 
 
+def _state_str(obj, default: str = "idle") -> str:
+    """Safely convert a playback_state/queue.state to a lowercase string.
+
+    MA delivers these as either an enum (with .value) or a plain string.
+    Calling .value on a plain string raises AttributeError, which the outer
+    try/except in get_metadata() silently catches and returns None — masking
+    the real state.  This helper handles both forms safely.
+    """
+    if not obj:
+        return default
+    return (obj.value if hasattr(obj, "value") else str(obj)).lower()
+
+
 def get_auth_error() -> Optional[str]:
     """Return the last authentication error message, or None if no auth error."""
     return _auth_error
@@ -401,13 +414,13 @@ def _get_target_player_id() -> Optional[str]:
     
     # Find first playing player
     for player in _client.players.players:
-        if player.playback_state and player.playback_state.value == "playing":
+        if _state_str(player.playback_state) == "playing":
             _last_active_player_id = player.player_id  # Remember active player
             return player.player_id
-    
+
     # Find first paused player (recently active)
     for player in _client.players.players:
-        if player.playback_state and player.playback_state.value == "paused":
+        if _state_str(player.playback_state) == "paused":
             return player.player_id
     
     # Use last active player if still exists
@@ -608,14 +621,6 @@ class MusicAssistantSource(BaseMetadataSource):
                 return None
             
             # Check queue state (use queue.state for consistency with corrected_elapsed_time)
-            # Use hasattr guard: MA may deliver state as a plain string OR as an enum.
-            # Calling .value on a plain string raises AttributeError, which the outer
-            # try/except catches and silently returns None — masking the real state.
-            def _state_str(obj, default="idle"):
-                if not obj:
-                    return default
-                return (obj.value if hasattr(obj, 'value') else str(obj)).lower()
-
             queue_state = _state_str(queue.state)
             player_state = _state_str(player.playback_state)
 
@@ -890,31 +895,33 @@ class MusicAssistantSource(BaseMetadataSource):
             
             # Convert to Spotify-compatible format
             queue_items = []
-            for item in items:
+            for i, item in enumerate(items):
                 media = item.media_item
                 if not media:
                     continue
-                
+
                 # Get artist name
                 artist_name = ""
                 if hasattr(media, 'artists') and media.artists:
                     artist_name = media.artists[0].name
                 elif hasattr(media, 'artist'):
                     artist_name = str(media.artist) if media.artist else ""
-                
+
                 # Get album art
                 art_url = None
                 try:
                     art_url = _client.get_media_item_image_url(item, size=64)
                 except Exception:
                     pass
-                
+
                 queue_items.append({
                     "name": media.name or item.name,
                     "artists": [{"name": artist_name}],
                     "album": {
                         "images": [{"url": art_url}] if art_url else []
-                    }
+                    },
+                    # Absolute index in the full queue (for play-from-here)
+                    "queue_index": current_index + 1 + i,
                 })
             
             return {
@@ -925,6 +932,29 @@ class MusicAssistantSource(BaseMetadataSource):
         except Exception as e:
             logger.debug(f"Music Assistant get_queue failed: {e}")
             return None
+
+    async def play_queue_item(self, queue_index: int) -> bool:
+        """Jump to a specific index in the queue and start playing."""
+        if not await _ensure_connected():
+            return False
+        try:
+            queue_id = await self._resolve_queue_id()
+            if not queue_id:
+                return False
+            try:
+                await _client.player_queues.play_index(queue_id, queue_index)
+            except AttributeError:
+                # Older client builds: fall back to raw command
+                await _client.send_command(
+                    "player_queues/play_index",
+                    queue_id=queue_id,
+                    index=queue_index,
+                )
+            logger.info("MA play_queue_item: queue_id=%r index=%d", queue_id, queue_index)
+            return True
+        except Exception as e:
+            logger.debug(f"Music Assistant play_queue_item failed: {e}")
+            return False
 
     # === Favorites (Like) Support ===
     

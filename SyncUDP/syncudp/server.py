@@ -2128,6 +2128,19 @@ async def get_playback_queue():
     })
 
 
+@app.route("/api/playback/queue/play-index", methods=['POST'])
+async def play_queue_at_index():
+    data = await request.get_json() or {}
+    queue_index = data.get('queue_index')
+    if queue_index is None:
+        return jsonify({"error": "queue_index required"}), 400
+    ma_source = await _music_assistant_source_for_controls()
+    success = await ma_source.play_queue_item(int(queue_index))
+    if not success:
+        return _ma_failure_response("queue play-index", ma_source)
+    return jsonify({"status": "success"})
+
+
 @app.route("/api/playback/liked", methods=['GET'])
 async def check_liked_status():
     track_id = request.args.get('track_id')
@@ -2730,6 +2743,82 @@ async def media_browser(subpath='index.html'):
 async def get_spotify_browser_token():
     """Spotify app browser integration is disabled in the UDP-only add-on."""
     return jsonify({"error": "Spotify app integration is disabled in SyncLyricsUDP"}), 410
+
+
+@app.route("/api/artist/images", methods=['GET'])
+async def get_artist_images():
+    """Get artist images from local DB, optionally including metadata and slideshow preferences."""
+    artist_id = request.args.get('artist_id')
+    include_metadata = request.args.get('include_metadata', 'false').lower() == 'true'
+    player_scope = _player_name_from_request()
+
+    hint_token = None
+    if player_scope:
+        hint_token = system_state.metadata_player_hint.set(player_scope)
+    try:
+        metadata = await get_current_song_meta_data()
+    finally:
+        if hint_token is not None:
+            system_state.metadata_player_hint.reset(hint_token)
+
+    artist_name = metadata.get('artist') if metadata else None
+    if not artist_name:
+        return jsonify({"images": [], "count": 0, "artist_name": None})
+
+    if metadata and metadata.get('artist_id'):
+        artist_id = metadata.get('artist_id')
+
+    from system_utils import ensure_artist_image_db
+    images = await ensure_artist_image_db(artist_name, artist_id)
+
+    response = {
+        "artist_id": artist_id,
+        "artist_name": artist_name,
+        "images": images,
+        "count": len(images),
+    }
+
+    if include_metadata:
+        from system_utils.artist_image import get_slideshow_preferences
+        folder = get_album_db_folder(artist_name, None)
+        metadata_path = folder / "metadata.json"
+        image_metadata = []
+        if metadata_path.exists():
+            try:
+                with open(metadata_path, 'r', encoding='utf-8') as f:
+                    full_metadata = json.load(f)
+                for img in full_metadata.get("images", []):
+                    if img.get("downloaded") and img.get("filename"):
+                        image_metadata.append({
+                            "source": img.get("source", "unknown"),
+                            "filename": img.get("filename"),
+                            "width": img.get("width"),
+                            "height": img.get("height"),
+                            "added_at": img.get("added_at"),
+                        })
+            except Exception as e:
+                logger.debug(f"Failed to load image metadata for '{artist_name}': {e}")
+        response["metadata"] = image_metadata
+        response["preferences"] = get_slideshow_preferences(artist_name)
+
+    return jsonify(response)
+
+
+@app.route("/api/artist/images/preferences", methods=['POST'])
+async def save_artist_slideshow_preferences_endpoint():
+    """Save slideshow preferences (excluded images, auto-enable, favorites) for an artist."""
+    data = await request.get_json() or {}
+    artist = data.get('artist')
+    if not artist:
+        return jsonify({"error": "Artist name required"}), 400
+    from system_utils.artist_image import save_slideshow_preferences
+    preferences = {
+        "excluded": data.get('excluded', []),
+        "auto_enable": data.get('auto_enable'),
+        "favorites": data.get('favorites', []),
+    }
+    success = save_slideshow_preferences(artist, preferences)
+    return jsonify({"success": success})
 
 
 @app.route('/api/slideshow/random-images')
