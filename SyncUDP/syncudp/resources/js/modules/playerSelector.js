@@ -16,7 +16,7 @@
  */
 
 import { showToast } from './dom.js';
-import { setSelectedPlayer } from './state.js';
+import { setSelectedPlayer, setEffectivePlayer } from './state.js';
 
 const STORAGE_KEY = 'selectedPlayer';
 const URL_LOCK_FLAG = Symbol('url-locked');
@@ -85,7 +85,10 @@ export function recordCurrentTrackPlayer(name) {
     if (!name) return;
     if (name === state.currentTrackPlayer) return;
     state.currentTrackPlayer = name;
+    // Keep effectivePlayer in sync: if no explicit selection, auto-track
+    // the server-reported player so control commands always carry ?player=
     if (!state.selected) {
+        setEffectivePlayer(name);
         updatePlayerDisplay();
     }
 }
@@ -314,6 +317,7 @@ export function selectPlayer(name) {
     const normalized = name && name.trim() ? name.trim() : null;
     state.selected = normalized;
     setSelectedPlayer(normalized);
+    setEffectivePlayer(normalized || state.currentTrackPlayer);
     persistSelection(normalized);
     updatePlayerDisplay();
     hidePlayerModal();
@@ -486,6 +490,7 @@ export function setupPlayerUI() {
         state.selected = readStoredPlayer();
     }
     setSelectedPlayer(state.selected);
+    setEffectivePlayer(state.selected);
 
     const toggle = document.getElementById('player-toggle');
     if (toggle) {

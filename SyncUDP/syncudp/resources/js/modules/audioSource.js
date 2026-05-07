@@ -231,6 +231,13 @@ async function refreshStatus() {
     }
 }
 
+function updateButtonState() {
+    if (elements.toggleBtn) {
+        elements.toggleBtn.textContent = isActive ? 'Stop' : 'Start';
+        elements.toggleBtn.classList.toggle('active', isActive);
+    }
+}
+
 function updateStatusDisplay(status) {
     // Update status text
     if (elements.recognitionStatus) {

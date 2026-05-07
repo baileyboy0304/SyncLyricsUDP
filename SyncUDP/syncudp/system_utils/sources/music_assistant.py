@@ -325,7 +325,12 @@ def _get_target_player_id() -> Optional[str]:
         player = _client.players.get(preferred_id.strip())
         if player:
             return player.player_id
-        # Rate limit this log to prevent spam when player is misconfigured
+        # Player not in the in-memory cache yet (start_listening still syncing).
+        # Return the configured ID directly so control commands can proceed —
+        # the WebSocket is open and MA will handle the command.
+        if not _listening:
+            return preferred_id.strip()
+        # Cache populated but player not found — log once per minute
         global _last_player_not_found_log
         now = time.time()
         if now - _last_player_not_found_log >= LOG_THROTTLE_INTERVAL:
@@ -415,14 +420,27 @@ class MusicAssistantSource(BaseMetadataSource):
         When the source was constructed with an explicit ``target_player_id``
         (multi-player mode: the request is scoped to a specific player), we
         always resolve the queue from that player so commands operate on the
-        UI-selected device. Otherwise we fall back to whichever queue/player
-        the metadata poll most recently observed.
+        UI-selected device.
+
+        Otherwise we use the cached values from the most recent get_metadata()
+        call.  If those are empty (cold start / no player scope in URL), we
+        fall back to auto-detecting the active player via _resolve_player_id()
+        so controls work without an explicit ?player= parameter.
         """
         if self._target_player_id:
             if not _client:
                 return None
             return await _get_active_queue_id(self._target_player_id)
-        return _current_queue_id or _current_player_id
+
+        if _current_queue_id:
+            return _current_queue_id
+
+        # Cache miss — auto-detect the active player and resolve its queue
+        player_id = self._resolve_player_id()
+        if player_id and _client:
+            return await _get_active_queue_id(player_id)
+
+        return _current_player_id or None
     
     @classmethod
     def get_config(cls) -> SourceConfig:
