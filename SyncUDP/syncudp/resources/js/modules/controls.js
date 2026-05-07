@@ -323,16 +323,19 @@ export function updateControlState(trackInfo) {
     if (nextBtn) nextBtn.disabled = !canControl;
     if (playPauseBtn) {
         playPauseBtn.disabled = !canControl;
-        const isPlaying = trackInfo.is_playing === true;
-        const icon = playPauseBtn.querySelector('i');
-
-        if (icon) {
-            if (isPlaying) {
-                icon.className = 'bi bi-pause-fill';
-                playPauseBtn.title = 'Pause';
-            } else {
-                icon.className = 'bi bi-play-fill';
-                playPauseBtn.title = 'Play';
+        // Skip icon update when MA state is unknown (null/undefined) to avoid
+        // flickering the optimistic icon back while MA is still responding.
+        if (trackInfo.is_playing === true || trackInfo.is_playing === false) {
+            const isPlaying = trackInfo.is_playing === true;
+            const icon = playPauseBtn.querySelector('i');
+            if (icon) {
+                if (isPlaying) {
+                    icon.className = 'bi bi-pause-fill';
+                    playPauseBtn.title = 'Pause';
+                } else {
+                    icon.className = 'bi bi-play-fill';
+                    playPauseBtn.title = 'Play';
+                }
             }
         }
     }
