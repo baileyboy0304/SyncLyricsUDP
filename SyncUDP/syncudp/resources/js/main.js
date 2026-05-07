@@ -64,8 +64,7 @@ import {
     toggleLike,
     setupTouchControls,
     attachProgressBarSeek,
-    toggleArtOnlyMode,
-    setupVolumePopup
+    toggleArtOnlyMode
 } from './modules/controls.js';
 
 // Background (Level 2)
@@ -693,15 +692,18 @@ async function updateLoop() {
         // Check for line-sync outro (triggers visual mode after 6s delay)
         checkForLineSyncOutro(data);
 
-        // Start word-sync animation loop if word-sync is available
-        // The rAF loop runs at display refresh rate (60-144fps) for smooth animation
-        // Position is interpolated between polls using anchor + elapsed time
-        startWordSyncAnimation();
-
-        // Start line-sync animation loop if word-sync is NOT active
-        // Uses the same flywheel clock approach for smooth pixel scrolling,
-        // font inflate/deflate, and active line highlighting
-        startLineSyncAnimation();
+        // Manage sync animations based on MA playback state.
+        // When paused: stop the flywheel so timecode freezes and lyrics don't advance.
+        // When playing (or state unknown): start/continue the animation loops.
+        // Stopping while paused also resets the flywheel so that on resume the
+        // clock re-anchors from the fresh API position (resync for live streams).
+        if (trackInfo.is_playing === false) {
+            stopWordSyncAnimation();
+            stopLineSyncAnimation();
+        } else {
+            startWordSyncAnimation();
+            startLineSyncAnimation();
+        }
         
         // Update word-sync toggle button UI state (icon, unavailable class)
         // This ensures button reflects current hasWordSync state after each poll
@@ -742,7 +744,6 @@ async function main() {
     initWordSyncStyle();  // Initialize word-sync style from localStorage
     setupQueueInteractions();
     setupTouchControls();
-    setupVolumePopup();       // Volume control popup
 
     // Initialize multi-finger touch gestures (3-finger tap for play/pause)
     initTouchGestures();

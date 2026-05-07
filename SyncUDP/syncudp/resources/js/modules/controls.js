@@ -145,18 +145,40 @@ export function attachControlHandlers(enterVisualModeFn = null, exitVisualModeFn
 
     if (playPauseBtn) {
         playPauseBtn.addEventListener('click', async () => {
+            // Optimistic update: flip icon immediately so the button feels responsive
+            const icon = playPauseBtn.querySelector('i');
+            const wasShowingPause = icon?.classList.contains('bi-pause-fill');
+            if (icon) {
+                icon.className = wasShowingPause ? 'bi bi-play-fill' : 'bi bi-pause-fill';
+                playPauseBtn.title = wasShowingPause ? 'Play' : 'Pause';
+            }
             try {
                 const result = await playbackCommand('play-pause');
-                if (reportFailure(result, 'Failed to toggle playback')) return;
+                if (reportFailure(result, 'Failed to toggle playback')) {
+                    // Revert optimistic update on server error
+                    if (lastTrackInfo) updateControlState(lastTrackInfo);
+                    else if (icon) {
+                        icon.className = wasShowingPause ? 'bi bi-pause-fill' : 'bi bi-play-fill';
+                        playPauseBtn.title = wasShowingPause ? 'Pause' : 'Play';
+                    }
+                    return;
+                }
+                // Confirm actual state from server after a short settling delay
                 setTimeout(async () => {
                     const trackInfo = await getCurrentTrack();
                     if (trackInfo && !trackInfo.error) {
                         updateControlState(trackInfo);
                     }
-                }, 200);
+                }, 300);
             } catch (error) {
                 console.error('Play/Pause error:', error);
                 showToast('Failed to toggle playback', 'error');
+                // Revert optimistic update on exception
+                if (lastTrackInfo) updateControlState(lastTrackInfo);
+                else if (icon) {
+                    icon.className = wasShowingPause ? 'bi bi-pause-fill' : 'bi bi-play-fill';
+                    playPauseBtn.title = wasShowingPause ? 'Pause' : 'Play';
+                }
             }
         });
     }
