@@ -623,10 +623,15 @@ async def current_track() -> dict:
         # player rather than the recognition engine, which never has a real
         # duration and only updates on each match. Falls through silently
         # when MA isn't reachable for this player.
+        #
+        # IMPORTANT: always call get_metadata() even when ma_player_id is None
+        # (auto-detect mode).  This populates _current_queue_id and
+        # _current_player_id in the MA module so that subsequent transport
+        # control commands can resolve the queue without an explicit link.
         try:
             ma_player_id = await _resolve_ma_player_id_for_request()
-            if ma_player_id:
-                from system_utils.sources.music_assistant import MusicAssistantSource
+            from system_utils.sources.music_assistant import MusicAssistantSource, is_configured
+            if is_configured():
                 ma_meta = await MusicAssistantSource(target_player_id=ma_player_id).get_metadata()
                 if ma_meta:
                     for key in ("position", "duration_ms", "is_playing"):
@@ -1998,100 +2003,49 @@ async def get_cover_art():
     
     return "", 404
 
-def _norm_player_label(value: str) -> str:
-    """Lowercase + strip non-alphanumerics so we can match player labels
-    even when one side uses spaces, the other underscores, etc."""
-    return ''.join(ch.lower() for ch in (value or '') if ch.isalnum())
-
-
 async def _resolve_ma_player_id_for_request() -> Optional[str]:
-    """Resolve ``?player=<name>`` to a concrete MA ``player_id``.
+    """Map ?player=<rtp-name> to the Music Assistant player_id to control.
 
-    The pinned RTP player IS a Music Assistant player, so we go look it
-    up in MA's player list. Resolution path:
+    The player shown in the UI badge is the ONLY player controlled —
+    no auto-detection of a different active player, no fallback to
+    whatever happens to be playing.
 
-      1. Registry mapping — ``music_assistant_player_id`` linked via the
-         UI rename, if present. Authoritative when set.
-      2. Candidate-name search against ``_client.players``: build a list
-         of plausible names (the URL param itself plus the registry's
-         ``display_name`` / ``ma_display_name`` / ``name`` if known).
-         For each candidate we try, in order:
-           a. Direct ``_client.players.get(candidate)`` (some MA players
-              use the human label as their id).
-           b. Exact match on ``player_id`` / ``display_name`` / ``name``.
-           c. Normalised (case + punctuation insensitive) match — the
-              same speaker can be ``test_lyrics_player`` on the RTP side
-              and ``Test Lyrics Player`` in MA.
-      3. If everything above fails we still hand back the raw name so MA
-         (and the route handler's error toast) describe the failure
-         instead of falling silently to a different player.
+    Priority:
+      1. Registry music_assistant_player_id — set via the rename/link
+         form in the player picker (authoritative).
+      2. Registry display_name — users typically name their UDP stream
+         to match the MA speaker label, so display_name IS the player_id.
+      3. Addon-level music_assistant_player_id option (global fallback).
 
-    Returns ``None`` only when the URL did not include a ``?player=``.
+    Returns None when ?player= is absent or no mapping exists;
+    the caller returns 500 so the user knows controls are not wired up.
+    No MA WebSocket connection is needed for this resolution.
     """
     player_name = (request.args.get('player') or '').strip()
     if not player_name:
         return None
 
-    registry_cfg = None
     try:
         from audio_recognition.player_registry import get_registry
         registry_cfg = get_registry().get(player_name)
-        if registry_cfg and registry_cfg.music_assistant_player_id:
-            return registry_cfg.music_assistant_player_id
+        if registry_cfg:
+            if registry_cfg.music_assistant_player_id:
+                return registry_cfg.music_assistant_player_id
+            display = (getattr(registry_cfg, 'display_name', '') or '').strip()
+            if display:
+                return display
     except Exception as exc:
         logger.debug(f"Player registry lookup failed for {player_name!r}: {exc}")
 
-    candidates: List[str] = [player_name]
-    if registry_cfg is not None:
-        for extra in (registry_cfg.display_name, registry_cfg.ma_display_name, registry_cfg.name):
-            if extra and extra not in candidates:
-                candidates.append(extra)
-
-    try:
-        from system_utils.sources import music_assistant as ma_module
-        if await ma_module._ensure_connected() and ma_module._client:
-            # Player list is populated by start_listening() events.  If the
-            # listener task hasn't had a scheduling slot yet (_listening=False),
-            # wait briefly so name-matching has something to work with.
-            if not ma_module.is_ready():
-                await ma_module._wait_for_ready(timeout=2.0)
-
-            if ma_module._client:
-                for cand in candidates:
-                    direct = ma_module._client.players.get(cand)
-                    if direct is not None:
-                        return getattr(direct, 'player_id', cand) or cand
-
-                cand_norm = {_norm_player_label(c) for c in candidates if c}
-                normalised_match: Optional[str] = None
-                for player in ma_module._client.players.players:
-                    pid = getattr(player, 'player_id', '') or ''
-                    labels = [pid,
-                              getattr(player, 'display_name', '') or '',
-                              getattr(player, 'name', '') or '']
-                    if any(label in candidates for label in labels if label):
-                        return pid
-                    if any(_norm_player_label(label) in cand_norm for label in labels if label):
-                        normalised_match = normalised_match or pid
-                if normalised_match:
-                    return normalised_match
-                logger.debug(
-                    f"No Music Assistant player matched pinned name {player_name!r}; "
-                    f"candidates tried: {candidates!r}"
-                )
-    except Exception as exc:
-        logger.debug(f"MA name lookup failed for {player_name!r}: {exc}")
-
-    # ?player= is an RTP/UDP player name (e.g. "player-1"), NOT an MA player_id.
-    # Returning it verbatim would send an invalid player_id to MA and cause 500s.
-    # Instead, fall back to the globally configured MA player_id so transport
-    # commands work even when this stream hasn't been linked to an MA player via
-    # the rename form.  Return None as last resort to let MusicAssistantSource
-    # auto-detect the active MA player via _get_target_player_id().
     configured_id = (conf("system.music_assistant.player_id", "") or "").strip()
     if configured_id:
         return configured_id
 
+    logger.debug(
+        "No MA player resolved for RTP player %r — link it via the player picker "
+        "rename form or set music_assistant_player_id in addon options",
+        player_name,
+    )
     return None
 
 

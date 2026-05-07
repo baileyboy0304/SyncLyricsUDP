@@ -435,7 +435,11 @@ class MusicAssistantSource(BaseMetadataSource):
         if _current_queue_id:
             return _current_queue_id
 
-        # Cache miss — auto-detect the active player and resolve its queue
+        # Cache miss — wait for MA to finish start_listening() before trying
+        # to auto-detect, otherwise _client.players.players may be empty.
+        if not is_ready():
+            await _wait_for_ready(timeout=3.0)
+
         player_id = self._resolve_player_id()
         if player_id and _client:
             return await _get_active_queue_id(player_id)
