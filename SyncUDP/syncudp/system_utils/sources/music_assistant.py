@@ -123,11 +123,12 @@ async def _connect() -> bool:
         logger.warning("MA not configured — set music_assistant_base_url in addon options")
         return False
 
-    # Rate limit connection attempts
+    # Rate limit connection attempts (background path only;
+    # _ensure_connected resets _last_connect_attempt before calling us)
     now = time.time()
     if now - _last_connect_attempt < _reconnect_delay:
-        logger.debug(
-            "MA connection rate-limited: next attempt in %.0fs (backoff=%ds)",
+        logger.warning(
+            "MA connection rate-limited: %.0fs until next attempt (backoff=%ds)",
             _reconnect_delay - (now - _last_connect_attempt),
             _reconnect_delay,
         )
@@ -179,16 +180,22 @@ async def _connect() -> bool:
         _reconnect_delay = MAX_RECONNECT_DELAY  # Don't retry frequently
         return False
     except asyncio.TimeoutError:
-        # Rate limit timeout warnings - log first 3, then every 5th attempt
-        if _connection_attempt_count <= 3 or _connection_attempt_count % 5 == 0:
-            logger.debug(f"Music Assistant connection timed out (attempt {_connection_attempt_count})")
+        logger.warning(
+            "MA connection timed out (url=%r attempt=%d backoff now %ds)",
+            _get_config_value("system.music_assistant.server_url", ""),
+            _connection_attempt_count,
+            min(_reconnect_delay * 2, MAX_RECONNECT_DELAY),
+        )
         _reconnect_delay = min(_reconnect_delay * 2, MAX_RECONNECT_DELAY)
         await _cleanup_failed_client()
         return False
     except Exception as e:
-        # Rate limit connection failure logs - log first 3, then every 5th attempt
-        if _connection_attempt_count <= 3 or _connection_attempt_count % 5 == 0:
-            logger.debug(f"Music Assistant connection failed (attempt {_connection_attempt_count}): {e}")
+        logger.warning(
+            "MA connection failed (url=%r attempt=%d): %s",
+            _get_config_value("system.music_assistant.server_url", ""),
+            _connection_attempt_count,
+            e,
+        )
         _reconnect_delay = min(_reconnect_delay * 2, MAX_RECONNECT_DELAY)
         await _cleanup_failed_client()
         return False
@@ -253,9 +260,17 @@ async def _wait_for_ready(timeout: float = 3.0) -> bool:
 
 
 async def _ensure_connected() -> bool:
-    """Ensure we're connected (WebSocket open), attempt reconnection if needed."""
+    """Ensure we're connected; bypasses backoff rate-limit for explicit commands.
+
+    Background polling uses _ensure_connected_nonblocking() which respects
+    the rate limit.  Transport controls call this and must always attempt
+    a real connection so a button press never silently fails due to backoff.
+    """
     if _connected and _client is not None:
         return True
+    # Reset the rate-limit window so _connect() always runs for explicit commands.
+    global _last_connect_attempt
+    _last_connect_attempt = 0
     result = await _connect()
     if not result:
         server_url = _get_config_value("system.music_assistant.server_url", "") or "(not set)"
