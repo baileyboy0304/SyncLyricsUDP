@@ -44,6 +44,7 @@ _reconnect_delay = 1  # Start at 1 second, exponential backoff
 _connection_lock: Optional[asyncio.Lock] = None  # Created lazily for event loop safety
 _connecting = False  # Fast check to avoid duplicate connection tasks
 _listener_task: Optional[asyncio.Task] = None  # Track listener to prevent duplicates
+_aiohttp_session: Optional[Any] = None  # Persistent aiohttp.ClientSession for the MA client
 
 # State cache (updated by WebSocket events)
 _current_player_id: Optional[str] = None
@@ -129,31 +130,38 @@ async def _connect() -> bool:
     
     server_url = _get_config_value("system.music_assistant.server_url", "")
     token = _get_config_value("system.music_assistant.token", "")
-    
+
     try:
         from music_assistant_client import MusicAssistantClient
-        
-        # Log INFO on first attempt, DEBUG on retries to reduce spam
-        if _connection_attempt_count == 1:
-            logger.info(f"Connecting to Music Assistant: {server_url}")
-        else:
-            logger.debug(f"Reconnecting to Music Assistant (attempt {_connection_attempt_count})")
-        
-        # Create client (token may be optional for older schema versions)
+        import aiohttp
+
+        # music-assistant-client 1.x requires a real aiohttp ClientSession;
+        # passing None silently breaks ws auth and connect, which is why
+        # transport calls used to look like they did nothing.
+        global _aiohttp_session
+        if _aiohttp_session is None or _aiohttp_session.closed:
+            _aiohttp_session = aiohttp.ClientSession()
+
+        # Always log INFO so connection problems are visible.
+        logger.info(
+            f"[MA] Connecting to {server_url} (token={'set' if token else 'unset'}, "
+            f"attempt {_connection_attempt_count})"
+        )
+
         _client = MusicAssistantClient(
             server_url=server_url,
-            aiohttp_session=None,
+            aiohttp_session=_aiohttp_session,
             token=token if token else None,
         )
-        
+
         # Connect with timeout
         await asyncio.wait_for(_client.connect(), timeout=4.0)
-        
+
         _connected = True
         _reconnect_delay = 1  # Reset backoff on success
         _connection_attempt_count = 0  # Reset on success
-        
-        logger.info("Connected to Music Assistant")
+
+        logger.info("[MA] Connected to Music Assistant")
         
         # Start listening in background to receive player/queue updates
         # This populates _client.players.players and _client.player_queues.player_queues
@@ -166,20 +174,19 @@ async def _connect() -> bool:
         return True
         
     except ImportError:
-        logger.error("music-assistant-client not installed. Run: pip install music-assistant-client")
+        logger.error("[MA] music-assistant-client not installed. Run: pip install music-assistant-client")
         _reconnect_delay = MAX_RECONNECT_DELAY  # Don't retry frequently
         return False
     except asyncio.TimeoutError:
-        # Rate limit timeout warnings - log first 3, then every 5th attempt
-        if _connection_attempt_count <= 3 or _connection_attempt_count % 5 == 0:
-            logger.debug(f"Music Assistant connection timed out (attempt {_connection_attempt_count})")
+        logger.warning(f"[MA] Connection timed out (attempt {_connection_attempt_count}, server={server_url!r})")
         _reconnect_delay = min(_reconnect_delay * 2, MAX_RECONNECT_DELAY)
         await _cleanup_failed_client()
         return False
     except Exception as e:
-        # Rate limit connection failure logs - log first 3, then every 5th attempt
-        if _connection_attempt_count <= 3 or _connection_attempt_count % 5 == 0:
-            logger.debug(f"Music Assistant connection failed (attempt {_connection_attempt_count}): {e}")
+        logger.warning(
+            f"[MA] Connection failed (attempt {_connection_attempt_count}, server={server_url!r}): "
+            f"{type(e).__name__}: {e}"
+        )
         _reconnect_delay = min(_reconnect_delay * 2, MAX_RECONNECT_DELAY)
         await _cleanup_failed_client()
         return False
