@@ -38,7 +38,8 @@ import {
     toggleLikeStatus,
     seekToPosition,
     getVolume,
-    setVolume as apiSetVolume
+    setVolume as apiSetVolume,
+    playQueueItem
 } from './api.js';
 
 // ========== SEEK STATE ==========
@@ -323,19 +324,15 @@ export function updateControlState(trackInfo) {
     if (nextBtn) nextBtn.disabled = !canControl;
     if (playPauseBtn) {
         playPauseBtn.disabled = !canControl;
-        // Skip icon update when MA state is unknown (null/undefined) to avoid
-        // flickering the optimistic icon back while MA is still responding.
-        if (trackInfo.is_playing === true || trackInfo.is_playing === false) {
-            const isPlaying = trackInfo.is_playing === true;
-            const icon = playPauseBtn.querySelector('i');
-            if (icon) {
-                if (isPlaying) {
-                    icon.className = 'bi bi-pause-fill';
-                    playPauseBtn.title = 'Pause';
-                } else {
-                    icon.className = 'bi bi-play-fill';
-                    playPauseBtn.title = 'Play';
-                }
+        const isPlaying = trackInfo.is_playing === true;
+        const icon = playPauseBtn.querySelector('i');
+        if (icon) {
+            if (isPlaying) {
+                icon.className = 'bi bi-pause-fill';
+                playPauseBtn.title = 'Pause';
+            } else {
+                icon.className = 'bi bi-play-fill';
+                playPauseBtn.title = 'Play';
             }
         }
     }
@@ -800,6 +797,28 @@ export async function fetchAndRenderQueue() {
                         <div class="queue-artist">${track.artists[0].name}</div>
                     </div>
                 `;
+
+                // "Play from here" on click
+                if (track.queue_index !== undefined) {
+                    item.title = 'Play from here';
+                    item.addEventListener('click', async () => {
+                        item.style.opacity = '0.4';
+                        try {
+                            const result = await playQueueItem(track.queue_index);
+                            if (result && result.error) {
+                                showToast('Failed to play track', 'error');
+                                item.style.opacity = '';
+                            } else {
+                                showToast('Playing from here', 'success', 1500);
+                                toggleQueueDrawer();
+                            }
+                        } catch (e) {
+                            console.error('Play queue item failed:', e);
+                            item.style.opacity = '';
+                        }
+                    });
+                }
+
                 list.appendChild(item);
             });
         } else {

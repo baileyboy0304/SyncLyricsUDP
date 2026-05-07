@@ -388,6 +388,10 @@ async function updateLoop() {
     let isIdleState = false;
     let currentPollInterval = updateInterval;
     let idleStartTime = null;
+    // MA state heuristic: when is_playing is null (MA state unknown), default to
+    // "playing" unless MA has explicitly confirmed a paused state.  This prevents
+    // the "no lyrics/wrong icon until toggle" symptom on app startup.
+    let maConfirmedPause = false;
 
     while (true) {
         const now = Date.now();
@@ -493,6 +497,7 @@ async function updateLoop() {
         if (trackChanged) {
             console.log(`[Main] Track changed: ${lastTrackId} -> ${trackId}`);
             lastTrackId = trackId;
+            maConfirmedPause = false;  // Re-assume playing for new track
 
             // Reset visual mode on track change
             resetVisualModeState();
@@ -658,7 +663,13 @@ async function updateLoop() {
         updateTrackInfo(trackInfo);
         updateAlbumArt(trackInfo, updateBackground);
         updateProgress(trackInfo);
-        updateControlState(trackInfo);
+
+        // Resolve is_playing for the UI: when MA state is unknown (null), use
+        // the heuristic — treat as "playing" unless MA previously said "paused".
+        const resolvedIsPlaying = trackInfo.is_playing === true ? true
+            : trackInfo.is_playing === false ? false
+            : !maConfirmedPause;
+        updateControlState({ ...trackInfo, is_playing: resolvedIsPlaying });
 
         // Next-up preview card - show in last 30 seconds of song
         updateNextUpCard(trackInfo);
@@ -692,20 +703,22 @@ async function updateLoop() {
         // Check for line-sync outro (triggers visual mode after 6s delay)
         checkForLineSyncOutro(data);
 
-        // Manage sync animations based on MA playback state.
-        // When paused: stop the flywheel so timecode freezes and lyrics don't advance.
-        // When playing: start/continue the animation loops.
-        // When null/undefined (MA state unknown): preserve current animation state.
-        // Stopping while paused resets the flywheel so on resume the clock
-        // re-anchors from the fresh API position (resync for live streams).
+        // Manage sync animations based on resolved playback state.
+        // resolvedIsPlaying combines the real MA state with the maConfirmedPause
+        // heuristic so animations start correctly on app launch even before MA
+        // has returned an explicit state.
         if (trackInfo.is_playing === false) {
-            stopWordSyncAnimation();
-            stopLineSyncAnimation();
+            maConfirmedPause = true;
         } else if (trackInfo.is_playing === true) {
+            maConfirmedPause = false;
+        }
+        if (resolvedIsPlaying) {
             startWordSyncAnimation();
             startLineSyncAnimation();
+        } else {
+            stopWordSyncAnimation();
+            stopLineSyncAnimation();
         }
-        // is_playing null/undefined = MA state unknown, leave animations as-is
         
         // Update word-sync toggle button UI state (icon, unavailable class)
         // This ensures button reflects current hasWordSync state after each poll
