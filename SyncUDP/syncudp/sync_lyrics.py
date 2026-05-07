@@ -690,6 +690,16 @@ async def main() -> NoReturn:
     else:
         logger.info("UDP recognition is disabled; no alternate local input sources are started.")
 
+    # Start Music Assistant connection eagerly so controls are ready before the
+    # first user interaction (avoids cold-start failures on button presses).
+    try:
+        from system_utils.sources.music_assistant import is_configured, start_background_connection
+        if is_configured():
+            start_background_connection()
+            logger.info("Music Assistant: background connection task started")
+    except Exception as _ma_exc:
+        logger.debug(f"Failed to start MA background connection at startup: {_ma_exc}")
+
     # Get active display methods
     # CRITICAL FIX: Use .get() with default to prevent crash if state file is missing representationMethods key
     # This handles corrupted state files or state files from old versions gracefully

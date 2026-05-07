@@ -2050,28 +2050,35 @@ async def _resolve_ma_player_id_for_request() -> Optional[str]:
     try:
         from system_utils.sources import music_assistant as ma_module
         if await ma_module._ensure_connected() and ma_module._client:
-            for cand in candidates:
-                direct = ma_module._client.players.get(cand)
-                if direct is not None:
-                    return getattr(direct, 'player_id', cand) or cand
+            # Player list is populated by start_listening() events.  If the
+            # listener task hasn't had a scheduling slot yet (_listening=False),
+            # wait briefly so name-matching has something to work with.
+            if not ma_module.is_ready():
+                await ma_module._wait_for_ready(timeout=2.0)
 
-            cand_norm = {_norm_player_label(c) for c in candidates if c}
-            normalised_match: Optional[str] = None
-            for player in ma_module._client.players.players:
-                pid = getattr(player, 'player_id', '') or ''
-                labels = [pid,
-                          getattr(player, 'display_name', '') or '',
-                          getattr(player, 'name', '') or '']
-                if any(label in candidates for label in labels if label):
-                    return pid
-                if any(_norm_player_label(label) in cand_norm for label in labels if label):
-                    normalised_match = normalised_match or pid
-            if normalised_match:
-                return normalised_match
-            logger.info(
-                f"No Music Assistant player matched pinned name {player_name!r}; "
-                f"candidates tried: {candidates!r}"
-            )
+            if ma_module._client:
+                for cand in candidates:
+                    direct = ma_module._client.players.get(cand)
+                    if direct is not None:
+                        return getattr(direct, 'player_id', cand) or cand
+
+                cand_norm = {_norm_player_label(c) for c in candidates if c}
+                normalised_match: Optional[str] = None
+                for player in ma_module._client.players.players:
+                    pid = getattr(player, 'player_id', '') or ''
+                    labels = [pid,
+                              getattr(player, 'display_name', '') or '',
+                              getattr(player, 'name', '') or '']
+                    if any(label in candidates for label in labels if label):
+                        return pid
+                    if any(_norm_player_label(label) in cand_norm for label in labels if label):
+                        normalised_match = normalised_match or pid
+                if normalised_match:
+                    return normalised_match
+                logger.info(
+                    f"No Music Assistant player matched pinned name {player_name!r}; "
+                    f"candidates tried: {candidates!r}"
+                )
     except Exception as exc:
         logger.debug(f"MA name lookup failed for {player_name!r}: {exc}")
 
