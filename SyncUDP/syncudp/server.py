@@ -2050,15 +2050,10 @@ async def _resolve_ma_player_id_for_request() -> Optional[str]:
 
 
 async def _music_assistant_source_for_controls():
-    """Always hand back a MusicAssistantSource for transport commands.
-
-    Routes commands at whichever player ``?player=<name>`` resolves to;
-    otherwise lets the source auto-detect the active MA queue. No guards
-    on metadata source or MA configuration — failures bubble up so the
-    UI can show a clear error toast.
-    """
     from system_utils.sources.music_assistant import MusicAssistantSource
     target_ma_id = await _resolve_ma_player_id_for_request()
+    rtp_player = (request.args.get('player') or '').strip() or '(none)'
+    logger.info("MA controls: ?player=%r → resolved ma_player_id=%r", rtp_player, target_ma_id)
     return MusicAssistantSource(target_player_id=target_ma_id)
 
 
@@ -2066,6 +2061,12 @@ async def _music_assistant_source_for_controls():
 async def toggle_playback():
     ma_source = await _music_assistant_source_for_controls()
     success = await ma_source.toggle_playback()
+    if not success:
+        from system_utils.sources.music_assistant import _connected, _listening, is_configured
+        logger.warning(
+            "MA play-pause FAILED — ma_configured=%s connected=%s listening=%s target=%r",
+            is_configured(), _connected, _listening, ma_source._target_player_id,
+        )
     return jsonify({"status": "success"}) if success else (jsonify({"error": "Music Assistant playback control failed"}), 500)
 
 
@@ -2073,6 +2074,12 @@ async def toggle_playback():
 async def next_track():
     ma_source = await _music_assistant_source_for_controls()
     success = await ma_source.next_track()
+    if not success:
+        from system_utils.sources.music_assistant import _connected, _listening, is_configured
+        logger.warning(
+            "MA next FAILED — ma_configured=%s connected=%s listening=%s target=%r",
+            is_configured(), _connected, _listening, ma_source._target_player_id,
+        )
     return jsonify({"status": "success"}) if success else (jsonify({"error": "Music Assistant next failed"}), 500)
 
 
@@ -2080,6 +2087,12 @@ async def next_track():
 async def previous_track():
     ma_source = await _music_assistant_source_for_controls()
     success = await ma_source.previous_track()
+    if not success:
+        from system_utils.sources.music_assistant import _connected, _listening, is_configured
+        logger.warning(
+            "MA previous FAILED — ma_configured=%s connected=%s listening=%s target=%r",
+            is_configured(), _connected, _listening, ma_source._target_player_id,
+        )
     return jsonify({"status": "success"}) if success else (jsonify({"error": "Music Assistant previous failed"}), 500)
 
 
