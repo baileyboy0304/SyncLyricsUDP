@@ -2075,14 +2075,24 @@ async def _resolve_ma_player_id_for_request() -> Optional[str]:
                         normalised_match = normalised_match or pid
                 if normalised_match:
                     return normalised_match
-                logger.info(
+                logger.debug(
                     f"No Music Assistant player matched pinned name {player_name!r}; "
                     f"candidates tried: {candidates!r}"
                 )
     except Exception as exc:
         logger.debug(f"MA name lookup failed for {player_name!r}: {exc}")
 
-    return player_name
+    # ?player= is an RTP/UDP player name (e.g. "player-1"), NOT an MA player_id.
+    # Returning it verbatim would send an invalid player_id to MA and cause 500s.
+    # Instead, fall back to the globally configured MA player_id so transport
+    # commands work even when this stream hasn't been linked to an MA player via
+    # the rename form.  Return None as last resort to let MusicAssistantSource
+    # auto-detect the active MA player via _get_target_player_id().
+    configured_id = (conf("system.music_assistant.player_id", "") or "").strip()
+    if configured_id:
+        return configured_id
+
+    return None
 
 
 async def _music_assistant_source_for_controls():
