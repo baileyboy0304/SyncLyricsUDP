@@ -71,6 +71,20 @@ FAVORITE_CACHE_TTL = 30.0  # Cache favorite status for 30 seconds
 MAX_RECONNECT_DELAY = 60  # Max 60 seconds between reconnection attempts
 CACHE_TTL = 1.0  # Cache TTL in seconds (MA updates come via events)
 
+# Auth error tracking — set when connection fails due to bad token/credentials
+_auth_error: Optional[str] = None
+
+
+def get_auth_error() -> Optional[str]:
+    """Return the last authentication error message, or None if no auth error."""
+    return _auth_error
+
+
+def clear_auth_error():
+    """Clear any stored auth error (called on successful connection)."""
+    global _auth_error
+    _auth_error = None
+
 
 def _get_config_value(key: str, default: Any = None) -> Any:
     """Get config value with proper type handling."""
@@ -110,7 +124,7 @@ async def _connect() -> bool:
     Returns True if connected, False otherwise.
     """
     global _client, _connected, _listening, _last_connect_attempt, _reconnect_delay
-    global _connection_attempt_count
+    global _connection_attempt_count, _auth_error
 
     # Only require WebSocket open (_connected + _client), not _listening.
     # _listening is set asynchronously by the start_listening task and must
@@ -162,7 +176,8 @@ async def _connect() -> bool:
         _connected = True
         _reconnect_delay = 1  # Reset backoff on success
         _connection_attempt_count = 0  # Reset on success
-        
+        _auth_error = None  # Clear any previous auth error on successful connection
+
         logger.info("Connected to Music Assistant")
         
         # Start listening in background to receive player/queue updates
@@ -186,16 +201,40 @@ async def _connect() -> bool:
             _connection_attempt_count,
             min(_reconnect_delay * 2, MAX_RECONNECT_DELAY),
         )
+        _auth_error = None
         _reconnect_delay = min(_reconnect_delay * 2, MAX_RECONNECT_DELAY)
         await _cleanup_failed_client()
         return False
     except Exception as e:
-        logger.warning(
-            "MA connection failed (url=%r attempt=%d): %s",
-            _get_config_value("system.music_assistant.server_url", ""),
-            _connection_attempt_count,
-            e,
-        )
+        # Detect authentication failures (bad token / wrong credentials)
+        error_str = str(e)
+        error_lower = error_str.lower()
+        is_auth_error = False
+        try:
+            import aiohttp
+            if isinstance(e, aiohttp.ClientResponseError) and e.status in (401, 403):
+                is_auth_error = True
+        except ImportError:
+            pass
+        if not is_auth_error and any(
+            kw in error_lower
+            for kw in ("401", "403", "unauthorized", "forbidden", "invalid token", "authentication")
+        ):
+            is_auth_error = True
+
+        if is_auth_error:
+            _auth_error = (
+                "Music Assistant: Authentication failed — check your API token in addon settings"
+            )
+            logger.warning("MA authentication error (url=%r): %s", _get_config_value("system.music_assistant.server_url", ""), e)
+        else:
+            _auth_error = None
+            logger.warning(
+                "MA connection failed (url=%r attempt=%d): %s",
+                _get_config_value("system.music_assistant.server_url", ""),
+                _connection_attempt_count,
+                e,
+            )
         _reconnect_delay = min(_reconnect_delay * 2, MAX_RECONNECT_DELAY)
         await _cleanup_failed_client()
         return False

@@ -842,22 +842,14 @@ body.hide-nav #player-ui-container {
 
 .controls-left,
 .controls-right {
-    flex: 1;
+    flex: 0 0 auto;  /* Collapse to content width so transport buttons sit close to like/queue */
     display: flex;
     align-items: center;
-    gap: 0.5rem;  /* Space between buttons in left/right groups */
-}
-
-.controls-left {
-    justify-content: space-between;
-}
-
-.controls-right {
-    justify-content: space-between;
+    gap: 0.5rem;
 }
 
 .controls-center {
-    flex: 2;
+    flex: 1;
     display: flex;
     justify-content: center;
     align-items: center;
