@@ -340,13 +340,18 @@ export async function getCurrentTrack() {
             if (isRttSpike || isPollSpike) {
                 // Bad sample - don't update anchor, let flywheel coast
                 setDebugBadSamples(debugBadSamples + 1);
-                // Still update playing state (important for pause detection)
-                setWordSyncIsPlaying(data.is_playing !== false);
+                // Only update playing state when explicitly known (null = MA state unknown)
+                if (data.is_playing === true || data.is_playing === false) {
+                    setWordSyncIsPlaying(data.is_playing);
+                }
             } else {
                 // Good sample - update anchor normally
                 setWordSyncAnchorPosition(correctedPosition);
                 setWordSyncAnchorTimestamp(endTime);
-                setWordSyncIsPlaying(data.is_playing !== false);
+                // Only update playing state when explicitly known (null = MA state unknown)
+                if (data.is_playing === true || data.is_playing === false) {
+                    setWordSyncIsPlaying(data.is_playing);
+                }
             }
         }
         

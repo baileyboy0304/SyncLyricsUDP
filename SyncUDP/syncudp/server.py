@@ -638,6 +638,11 @@ async def current_track() -> dict:
                         value = ma_meta.get(key)
                         if value is not None:
                             scoped[key] = value
+                else:
+                    # MA configured but state unknown — send null so the frontend
+                    # preserves its current animation/icon state rather than
+                    # defaulting to the hardcoded is_playing:True from the UDP engine.
+                    scoped["is_playing"] = None
         except Exception as exc:
             logger.debug(f"MA timeline override failed: {exc}")
         return scoped

@@ -694,16 +694,18 @@ async function updateLoop() {
 
         // Manage sync animations based on MA playback state.
         // When paused: stop the flywheel so timecode freezes and lyrics don't advance.
-        // When playing (or state unknown): start/continue the animation loops.
-        // Stopping while paused also resets the flywheel so that on resume the
-        // clock re-anchors from the fresh API position (resync for live streams).
+        // When playing: start/continue the animation loops.
+        // When null/undefined (MA state unknown): preserve current animation state.
+        // Stopping while paused resets the flywheel so on resume the clock
+        // re-anchors from the fresh API position (resync for live streams).
         if (trackInfo.is_playing === false) {
             stopWordSyncAnimation();
             stopLineSyncAnimation();
-        } else {
+        } else if (trackInfo.is_playing === true) {
             startWordSyncAnimation();
             startLineSyncAnimation();
         }
+        // is_playing null/undefined = MA state unknown, leave animations as-is
         
         // Update word-sync toggle button UI state (icon, unavailable class)
         // This ensures button reflects current hasWordSync state after each poll
