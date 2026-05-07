@@ -623,10 +623,15 @@ async def current_track() -> dict:
         # player rather than the recognition engine, which never has a real
         # duration and only updates on each match. Falls through silently
         # when MA isn't reachable for this player.
+        #
+        # IMPORTANT: always call get_metadata() even when ma_player_id is None
+        # (auto-detect mode).  This populates _current_queue_id and
+        # _current_player_id in the MA module so that subsequent transport
+        # control commands can resolve the queue without an explicit link.
         try:
             ma_player_id = await _resolve_ma_player_id_for_request()
-            if ma_player_id:
-                from system_utils.sources.music_assistant import MusicAssistantSource
+            from system_utils.sources.music_assistant import MusicAssistantSource, is_configured
+            if is_configured():
                 ma_meta = await MusicAssistantSource(target_player_id=ma_player_id).get_metadata()
                 if ma_meta:
                     for key in ("position", "duration_ms", "is_playing"):
