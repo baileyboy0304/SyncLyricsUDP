@@ -45,7 +45,8 @@ import {
     setPixelScrollSpeed,
     setLineSyncedLyrics,
     setHasLineSync,
-    selectedPlayer
+    selectedPlayer,
+    effectivePlayer
 } from './state.js';
 import { isLatencyBeingAdjusted } from './latency.js';
 
@@ -258,14 +259,17 @@ export async function getConfig() {
 // ========== TRACK & LYRICS ==========
 
 /**
- * Append `?player=<name>` to a URL when a multi-instance player is selected.
- * The backend (/current-track, /lyrics) scopes the response to that player's
- * recognition engine when the param is present.
+ * Append `?player=<name>` to a URL when a player is active.
+ * Uses the explicit user selection when set; falls back to the auto-detected
+ * player from the last /current-track response so control commands (play,
+ * pause, next, …) always carry a player scope even before the user opens the
+ * player picker.
  */
 function withPlayerScope(path) {
-    if (!selectedPlayer) return path;
+    const player = selectedPlayer || effectivePlayer;
+    if (!player) return path;
     const sep = path.includes('?') ? '&' : '?';
-    return `${path}${sep}player=${encodeURIComponent(selectedPlayer)}`;
+    return `${path}${sep}player=${encodeURIComponent(player)}`;
 }
 
 /**

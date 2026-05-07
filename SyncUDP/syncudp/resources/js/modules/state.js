@@ -60,6 +60,11 @@ export let pendingArtUrl = null;
 // Set by playerSelector.js; read by api.js to append ?player= to /current-track
 // and /lyrics so the same server can drive multiple displays.
 export let selectedPlayer = null;
+// Effective player: selectedPlayer when the user has made an explicit choice,
+// otherwise the player the server last reported on /current-track.
+// Used by withPlayerScope() so control commands (play/pause/next/…) always
+// carry a ?player= even before the user opens the player picker.
+export let effectivePlayer = null;
 export let lastAlbumArtUrl = null;   // Raw backend URL of last loaded album art (for change detection)
 export let lastAlbumArtPath = null;  // File path of last loaded album art (most stable identifier)
 
@@ -225,3 +230,4 @@ export function setDebugPollInterval(value) { debugPollInterval = value; }
 export function setDebugSource(value) { debugSource = value; }
 export function setDebugBadSamples(value) { debugBadSamples = value; }
 export function setSelectedPlayer(value) { selectedPlayer = value || null; }
+export function setEffectivePlayer(value) { effectivePlayer = value || null; }
