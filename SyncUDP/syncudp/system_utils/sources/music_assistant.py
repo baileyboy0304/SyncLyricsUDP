@@ -120,11 +120,17 @@ async def _connect() -> bool:
     
     # Check if configured
     if not is_configured():
+        logger.warning("MA not configured — set music_assistant_base_url in addon options")
         return False
-    
+
     # Rate limit connection attempts
     now = time.time()
     if now - _last_connect_attempt < _reconnect_delay:
+        logger.debug(
+            "MA connection rate-limited: next attempt in %.0fs (backoff=%ds)",
+            _reconnect_delay - (now - _last_connect_attempt),
+            _reconnect_delay,
+        )
         return False
     
     _last_connect_attempt = now
@@ -247,15 +253,17 @@ async def _wait_for_ready(timeout: float = 3.0) -> bool:
 
 
 async def _ensure_connected() -> bool:
-    """Ensure we're connected (WebSocket open), attempt reconnection if needed.
-
-    Only checks _connected + _client; does NOT require _listening.  The
-    _listening flag is set asynchronously inside _start_listening() and
-    must not block control commands that only need the open WebSocket.
-    """
+    """Ensure we're connected (WebSocket open), attempt reconnection if needed."""
     if _connected and _client is not None:
         return True
-    return await _connect()
+    result = await _connect()
+    if not result:
+        server_url = _get_config_value("system.music_assistant.server_url", "") or "(not set)"
+        logger.warning(
+            "MA _ensure_connected: failed — url=%r configured=%s connected=%s",
+            server_url, is_configured(), _connected,
+        )
+    return result
 
 
 async def _ensure_connected_nonblocking() -> bool:
@@ -441,9 +449,19 @@ class MusicAssistantSource(BaseMetadataSource):
             await _wait_for_ready(timeout=3.0)
 
         player_id = self._resolve_player_id()
+        logger.debug(
+            "MA _resolve_queue_id: auto-detect player_id=%r current_queue=%r current_player=%r ready=%s",
+            player_id, _current_queue_id, _current_player_id, is_ready(),
+        )
         if player_id and _client:
             return await _get_active_queue_id(player_id)
 
+        logger.warning(
+            "MA _resolve_queue_id: no queue found — target=%r current_queue=%r "
+            "current_player=%r ready=%s players_count=%d",
+            self._target_player_id, _current_queue_id, _current_player_id,
+            is_ready(), len(list(_client.players.players)) if _client else -1,
+        )
         return _current_player_id or None
     
     @classmethod
@@ -670,17 +688,22 @@ class MusicAssistantSource(BaseMetadataSource):
         """Toggle play/pause on the active queue."""
         if not await _ensure_connected():
             return False
-        
+
         try:
             queue_id = await self._resolve_queue_id()
             if not queue_id:
+                logger.warning(
+                    "MA toggle_playback: no queue_id resolved for target=%r",
+                    self._target_player_id,
+                )
                 return False
-            
-            # Use the built-in play_pause() method which handles toggle
+
+            logger.info("MA toggle_playback: play_pause queue_id=%r", queue_id)
             await _client.player_queues.play_pause(queue_id)
+            logger.info("MA toggle_playback: success")
             return True
         except Exception as e:
-            logger.debug(f"Music Assistant toggle_playback failed: {e}")
+            logger.warning("MA toggle_playback exception for target=%r: %s", self._target_player_id, e)
             return False
     
     async def play(self) -> bool:
