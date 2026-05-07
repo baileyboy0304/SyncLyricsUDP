@@ -163,13 +163,10 @@ export function attachControlHandlers(enterVisualModeFn = null, exitVisualModeFn
                     }
                     return;
                 }
-                // Confirm actual state from server after a short settling delay
-                setTimeout(async () => {
-                    const trackInfo = await getCurrentTrack();
-                    if (trackInfo && !trackInfo.error) {
-                        updateControlState(trackInfo);
-                    }
-                }, 300);
+                // Do NOT confirm state immediately: MA WebSocket propagation takes
+                // 200-500 ms, so a short-delay poll would read stale "playing" and
+                // revert the optimistic icon.  The main update loop (next ~1s poll)
+                // reads the settled MA state and calls updateControlState() correctly.
             } catch (error) {
                 console.error('Play/Pause error:', error);
                 showToast('Failed to toggle playback', 'error');

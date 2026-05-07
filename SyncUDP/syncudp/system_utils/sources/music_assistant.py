@@ -608,14 +608,21 @@ class MusicAssistantSource(BaseMetadataSource):
                 return None
             
             # Check queue state (use queue.state for consistency with corrected_elapsed_time)
-            # queue.state is what corrected_elapsed_time uses to decide whether to interpolate
-            queue_state = queue.state.value if queue.state else "idle"
-            player_state = player.playback_state.value if player.playback_state else "idle"
-            
-            # DEBUG: Uncomment to diagnose state detection issues
-            # logger.debug(f"MA state check - queue.state={queue_state}, player.playback_state={player_state}, "
-            #             f"current_item={'present' if queue.current_item else 'None'}, "
-            #             f"elapsed_time_last_updated={queue.elapsed_time_last_updated}")
+            # Use hasattr guard: MA may deliver state as a plain string OR as an enum.
+            # Calling .value on a plain string raises AttributeError, which the outer
+            # try/except catches and silently returns None — masking the real state.
+            def _state_str(obj, default="idle"):
+                if not obj:
+                    return default
+                return (obj.value if hasattr(obj, 'value') else str(obj)).lower()
+
+            queue_state = _state_str(queue.state)
+            player_state = _state_str(player.playback_state)
+
+            logger.debug(
+                "MA state: queue_state=%r player_state=%r player_id=%r",
+                queue_state, player_state, player_id,
+            )
             
             # Determine staleness: how long since MA last updated the position
             # This distinguishes "just paused" from "stale session data from hours ago"
